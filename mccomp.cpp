@@ -48,8 +48,6 @@ FILE* pFile;
 //===----------------------------------------------------------------------===//
 // Lexer
 //===----------------------------------------------------------------------===//
-
-const std::string ident = "IDENT";
 // The lexer returns one of these for known things.
 enum TOKEN_TYPE {
 
@@ -379,7 +377,7 @@ static TOKEN gettok() {
 static TOKEN CurTok;
 static std::deque<TOKEN> tok_buffer;
 
-static bool populateBuffer() {
+static void populateBuffer() {
   while (tok_buffer.size() <= 2)
     tok_buffer.push_back(gettok());
 }
@@ -411,18 +409,48 @@ static TOKEN peekNext() {
 // useless af currently
 static void putBackToken(TOKEN tok) { tok_buffer.push_front(tok); }
 
-static void throwError(const std::unordered_set<std::string>& expected, std::string message = "") {
-  throw std::runtime_error("error: " + message);
-}
+static void throwError(const std::unordered_set<std::string>& expected, std::string message = "") { throw std::runtime_error("error: " + message); }
 //===----------------------------------------------------------------------===//
 // AST nodes
 //===----------------------------------------------------------------------===//
+
+template <typename T> using ptrVec = std::vector<std::unique_ptr<T>>;
+
+// we also reverse when casting a vector of pointers to another vector due to the way we build up our left recursions backwards
+template <typename Base, typename Derived>
+void castToDerived(std::vector<std::unique_ptr<Base>>& nodes, std::vector<std::unique_ptr<Derived>>& target) {
+  for (int i = nodes.size() - 1; i >= 0; i++) {
+    auto& node = nodes[i];
+    Derived* derivedPtr = static_cast<Derived*>(node.release());
+    target.push_back(std::unique_ptr<Derived>(derivedPtr));
+  }
+}
+
+template <typename Base, typename Derived> void castToDerived(std::vector<std::unique_ptr<Base>>& nodes, std::unique_ptr<Derived>& target) {
+  for (auto& node : nodes) {
+    Derived* derivedPtr = static_cast<Derived*>(node.release());
+    target.reset(derivedPtr);
+    break;
+  }
+}
+
+template <typename Base, typename Derived> void castToDerived(std::unique_ptr<Base>& node, std::vector<std::unique_ptr<Derived>>& target) {
+
+  Derived* derivedPtr = static_cast<Derived*>(node.release());
+  target.push_back(std::unique_ptr<Derived>(derivedPtr));
+}
+
+template <typename Base, typename Derived> void castToDerived(std::unique_ptr<Base>& node, std::unique_ptr<Derived>& target) {
+
+  Derived* derivedPtr = static_cast<Derived*>(node.release());
+  target.reset(derivedPtr);
+}
 
 /// ASTNode - Base class for all AST nodes.
 class ASTNode {
 public:
   // destructor
-  virtual ~ASTNode() {}
+  virtual ~ASTNode() = default;
   virtual Value* codegen() = 0;
   virtual std::string to_string() const { return ""; };
 };
@@ -434,16 +462,69 @@ class IntAST : public ASTNode {
   std::string Name;
 
 public:
-  IntAST(TOKEN tok, int val) : Val(val), Tok(tok) {};
+  IntAST(TOKEN tok, int val) : Val(val), Tok(tok){};
   virtual Value* codegen() override;
   virtual std::string to_string() const override { return std::to_string(Val); };
 };
 
-class IDENTAST : public ASTNode{
-  std::string identifier;
+class StorageAST : public ASTNode {
 
-  public:
-    IDENTAST(std::string identifier): identifier(identifier) {};
+public:
+  std::string value;
+  StorageAST(std::string value) : value(value){};
+  Value* codegen() {}
+};
+
+class DeclAST : public ASTNode {
+
+public:
+  std::string type;
+  std::string name;
+
+  DeclAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name) {
+
+    std::unique_ptr<StorageAST> typeStorage;
+    std::unique_ptr<StorageAST> nameStorage;
+
+    castToDerived<ASTNode, StorageAST>(type, typeStorage);
+    castToDerived<ASTNode, StorageAST>(name, nameStorage);
+    this->type = typeStorage->value;
+    this->name = nameStorage->value;
+  };
+
+  DeclAST(){};
+
+  std::string to_string() const {}
+  virtual Value* codegen() {}
+};
+
+class VarDeclAST : public DeclAST {
+public:
+  VarDeclAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name) : DeclAST(std::move(type), std::move(name)){};
+  std::string to_string() const {}
+  Value* codegen() {}
+};
+
+class ParamAST : public VarDeclAST {
+public:
+  ParamAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name) : VarDeclAST(std::move(type), std::move(name)){};
+  std::string to_string() const {}
+  Value* codegen() {}
+};
+
+class StmtAST : public ASTNode {};
+
+class BlockAST : public ASTNode {
+  ptrVec<VarDeclAST> localDecls;
+  ptrVec<StmtAST> stmts;
+
+public:
+  BlockAST(ptrVec<ASTNode>&& localDecls, ptrVec<ASTNode>&& stmts) {
+    castToDerived<ASTNode, VarDeclAST>(localDecls, this->localDecls);
+    castToDerived<ASTNode, StmtAST>(stmts, this->stmts);
+  }
+  std::string to_string() const {}
+  Value* codegen() {}
 };
 
 class ExternAST : public ASTNode {
@@ -451,28 +532,56 @@ class ExternAST : public ASTNode {
   std::string name;
   std::vector<std::unique_ptr<ParamAST>> params;
 
-  public:
-    ExternAST(std::string type, std::string name, std::vector<std::unique_ptr<ParamAST>> params): type(type), name(name), params(params) {};
+public:
+  ExternAST(std::string type, std::string name, std::vector<std::unique_ptr<ASTNode>>&& params) : type(type), name(name) {
+    castToDerived<ASTNode, ParamAST>(params, this->params);
+  };
 
+  std::string to_string() const {}
+  Value* codegen() {}
 };
 
-class DeclAST : public ASTNode {};
+class FuncDeclAST : public DeclAST {
+public:
+  std::vector<std::unique_ptr<ParamAST>> params;
+  std::unique_ptr<BlockAST> block;
 
-class VarDeclAST : public DeclAST {};
+  FuncDeclAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name, ptrVec<ASTNode>&& params, ptrVec<ASTNode>&& block) : DeclAST(std::move(type), std::move(name)) {
+    castToDerived<ASTNode, ParamAST>(params, this->params);
+    castToDerived<ASTNode, BlockAST>(block, this->block);
+  };
 
-class FuncAST : public DeclAST {};
+   FuncDeclAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name) : DeclAST(std::move(type), std::move(name)) {
+  };
 
-class ParamAST : public ASTNode {
 
+  std::string to_string() const {}
+  Value* codegen() {}
+};
+
+class PartialFuncDeclAST: public ASTNode {
+  public:
+    ptrVec<ASTNode> params;
+    ptrVec<ASTNode> block;
+
+    PartialFuncDeclAST(ptrVec<ASTNode>&& params, ptrVec<ASTNode>&& block): params(std::move(params)), block(std::move(block)) {
+    };
+
+    PartialFuncDeclAST(){};
+
+    Value* codegen() {}
 };
 
 class ProgramAST : public ASTNode {
-  std::vector<std::unique_ptr<ExternAST>>& externList;
-  std::vector<std::unique_ptr<DeclAST>>& declList;
+  std::vector<std::unique_ptr<ExternAST>> externList;
+  std::vector<std::unique_ptr<DeclAST>> declList;
 
 public:
-  ProgramAST(std::vector<std::unique_ptr<ExternAST>>& externList, std::vector<std::unique_ptr<DeclAST>>& declList)
-      : externList(externList), declList(declList) {}
+  ProgramAST(std::vector<std::unique_ptr<ASTNode>>&& externList, std::vector<std::unique_ptr<ASTNode>>&& declList) {
+    castToDerived<ASTNode, ExternAST>(externList, this->externList);
+    castToDerived<ASTNode, DeclAST>(declList, this->declList);
+  }
+
   virtual std::string to_string() const override {
     std::cout << "program: {" << std::endl;
     for (auto& externNode : externList) {
@@ -483,10 +592,13 @@ public:
     }
     std::cout << "}" << std::endl;
   }
+
+  Value* codegen() {}
 };
 
-std::unordered_map<std::string, std::function<std::vector<std::unique_ptr<ASTNode>>&()>> functionMap;
-
+std::unordered_map<std::string, std::function<std::vector<std::unique_ptr<ASTNode>>()>> functionMap;
+std::unordered_map<int, std::string> typeToString = {
+    {TOKEN_TYPE::IDENT, "IDENT"}, {TOKEN_TYPE::INT_LIT, "INT_LIT"}, {TOKEN_TYPE::FLOAT_LIT, "FLOAT_LIT"}, {TOKEN_TYPE::BOOL_LIT, "BOOL_LIT"}};
 /* add other AST nodes as nessasary */
 
 //===----------------------------------------------------------------------===//
@@ -495,16 +607,15 @@ std::unordered_map<std::string, std::function<std::vector<std::unique_ptr<ASTNod
 
 /* Add function calls for each production */
 
-// general function template
-// nonterminal ::= terminal nonterminal2
-// nonterminal ::= nonterminal3 nonterminal4 terminal
 using nonTerminalInfo = std::map<std::string, std::vector<std::unique_ptr<ASTNode>>>;
 
-nonTerminalInfo& nonterminal(const std::string& name) {
+nonTerminalInfo nonterminal(const std::string& name) {
   bool foundMatch = false;
   std::unordered_set<std::string> expected;
   nonTerminalInfo result;
   std::vector<std::string> epsilonRule;
+
+  std::string typeLiteralString = typeToString.contains(CurTok.type) ? typeToString[CurTok.type] : "";
 
   if (productions.contains(name)) {
     auto& rules = productions[name];
@@ -514,24 +625,23 @@ nonTerminalInfo& nonterminal(const std::string& name) {
       expected.insert(firstSets[firstSymbol].begin(), firstSets[firstSymbol].end());
 
       // incase we need to use follow set n shit
+      // this is assuming theres only one epsilon rule to choose (which there should be, most stuff is LL(1))
       if (firstSets[firstSymbol].contains("''")) {
         epsilonRule = rule;
-        break;
       }
 
-      if (firstSets[firstSymbol].contains(CurTok.lexeme) ||
-          (firstSets[firstSymbol].contains(ident) && CurTok.type == IDENT)) {
+      if (firstSets[firstSymbol].contains(CurTok.lexeme) || firstSets[firstSymbol].contains(typeLiteralString)) {
         foundMatch = true;
         for (std::string symbol : rule) {
           // shouldn't be any overlap in firstSets (except for when we get to expr)
           // so this should only 'match' one rule
-          if (isTerminal(symbol) && (symbol == CurTok.lexeme || (symbol == ident && CurTok.type == IDENT))) {
+          if (isTerminal(symbol) && (symbol == CurTok.lexeme || symbol == typeLiteralString)) {
 
-            if(CurTok.type == IDENT){
-              result[ident] = {std::make_unique<IDENTAST>(CurTok.lexeme)};
-            }
+            result[symbol].push_back(std::make_unique<StorageAST>(CurTok.lexeme));
 
             getNextToken();
+            typeLiteralString = typeToString.contains(CurTok.type) ? typeToString[CurTok.type] : "";
+
           } else if (!isTerminal(symbol)) {
             result[symbol] = functionMap[symbol]();
           } else {
@@ -549,8 +659,7 @@ nonTerminalInfo& nonterminal(const std::string& name) {
     if (!foundMatch) {
       // see if we should use an available epsilon production
       //'using' the production just entails returning an empty result map for this nonterminal
-      if (!(!epsilonRule.empty() &&
-            (followSets[name].contains(CurTok.lexeme) || (followSets[name].contains(ident) && CurTok.type == IDENT)))) {
+      if (!(!epsilonRule.empty() && (followSets[name].contains(CurTok.lexeme) || followSets[name].contains(typeLiteralString)))) {
         throwError(expected);
       }
     }
@@ -561,58 +670,24 @@ nonTerminalInfo& nonterminal(const std::string& name) {
   return result;
 }
 
-template <typename T> using nonTermVec = std::vector<std::unique_ptr<T>>;
-
-template <typename T> std::unique_ptr<T> castToDerived(std::unique_ptr<ASTNode> ptr) {
-  std::unique_ptr<T> node(static_cast<T*>(ptr.release()));
-  return node;
-}
-
 /* program ::= extern_list decl_list
 program ::= decl_list */
 
 std::unique_ptr<ProgramAST> program() {
   // first production rule so we need to populate curtok
   getNextToken();
+  nonTerminalInfo info = nonterminal("program");
 
-  nonTerminalInfo& info = nonterminal("program");
-
-  nonTermVec<ExternAST> externList;
-  nonTermVec<DeclAST> declList;
-  auto& declNodes = info["decl_list"];
-  auto& externNodes = info["extern_list"];
-
-  for (auto& node : declNodes) {
-    auto declNode = castToDerived<DeclAST>(std::move(node));
-    declList.push_back(declNode);
-  }
-
-  for (auto& node : externNodes) {
-    auto externNode = castToDerived<ExternAST>(std::move(node));
-    externList.push_back(externNode);
-  }
-
-  return std::make_unique<ProgramAST>(externList, declList);
+  return std::make_unique<ProgramAST>(std::move(info["extern_list"]), std::move(info["decl_list"]));
 }
 
 // extern_list ::= extern extern_list'
-nonTermVec<ExternAST>& extern_list() {
-  nonTerminalInfo& info = nonterminal("extern_list");
+ptrVec<ASTNode> extern_list() {
+  nonTerminalInfo info = nonterminal("extern_list");
 
-  nonTermVec<ExternAST> externList;
-  auto& externNodeSingle = info["extern"];
-  auto& externNodes = info["extern_list'"];
+  ptrVec<ASTNode> externList = std::move(info["extern_list'"]);
 
-  for (auto& node : externNodeSingle) {
-    auto externNode = castToDerived<ExternAST>(std::move(node));
-    externList.push_back(externNode);
-  }
-
-  for (auto& node : externNodes) {
-    auto externNode = castToDerived<ExternAST>(std::move(node));
-    externList.push_back(externNode);
-  }
-
+  externList.push_back(std::move(info["extern"][0]));
   return externList;
 }
 
@@ -620,31 +695,233 @@ nonTermVec<ExternAST>& extern_list() {
 // extern_list' ::= ''
 // if we don't need to return derived nodes just yet, then don't. More efficient. Otherwise we will be copying nodes
 // from vector to vector everytime we upcast and downcast. eugh.
-nonTermVec<ASTNode>& extern_list_prime() {
-  nonTerminalInfo& info = nonterminal("extern_list'");
+ptrVec<ASTNode> extern_list_prime() {
+  nonTerminalInfo info = nonterminal("extern_list'");
+  if (info.size() == 0) {
+    return ptrVec<ASTNode>{};
+  }
+  ptrVec<ASTNode> externList = std::move(info["extern_list'"]);
 
-  auto& externNodeSingle = info["extern"];
-  nonTermVec<ASTNode> externList = info["extern_list'"];
-
-  externList.push_back(std::move(externNodeSingle[0]));
+  externList.push_back(std::move(info["extern"][0]));
 
   return externList;
 }
 
 // extern ::= "extern" type_spec IDENT "(" params ")" ";"
-nonTermVec<ASTNode>& extern_() {
+ptrVec<ASTNode> extern_() {
 
-  nonTerminalInfo& info = nonterminal("extern");
+  nonTerminalInfo info = nonterminal("extern");
 
-  auto& type = info["type_spec"];
-  auto& identifier = info[ident];
-  auto& params = info["params"];
+  ptrVec<StorageAST> typeNode;
+  ptrVec<StorageAST> identNode;
+  castToDerived<ASTNode, StorageAST>(info["type_spec"], typeNode);
+  castToDerived<ASTNode, StorageAST>(info["IDENT"], identNode);
 
-  
-  std::vector<std::unique_ptr<ASTNode>> res = {std::make_unique<ExternAST>(type, identifier, params)};
+  ptrVec<ASTNode> res;
+  res.push_back(std::make_unique<ExternAST>(typeNode[0]->value, identNode[0]->value, std::move(info["params"])));
 
   return res;
 }
+
+// decl_list ::= decl decl_list'
+ptrVec<ASTNode> decl_list() {
+  nonTerminalInfo info = nonterminal("decl_list");
+
+  ptrVec<ASTNode> declList = std::move(info["decl_list'"]);
+
+  declList.push_back(std::move(info["decl"][0]));
+  return declList;
+}
+
+// decl_list' ::= decl decl_list'
+// decl_list' ::= ''
+ptrVec<ASTNode> decl_list_prime() {
+  nonTerminalInfo info = nonterminal("decl_list'");
+
+  if (info.size() == 0) {
+    return ptrVec<ASTNode>{};
+  }
+
+  ptrVec<ASTNode> declList = std::move(info["decl_list'"]);
+
+  declList.push_back(std::move(info["decl"][0]));
+
+  return declList;
+}
+
+// decl ::= var_type IDENT decl'
+// decl ::= "void" IDENT "(" params ")" block
+ptrVec<ASTNode> decl() {
+
+  nonTerminalInfo info = nonterminal("decl");
+
+  ptrVec<ASTNode> type;
+  std::unique_ptr<BlockAST> block;
+  ptrVec<ASTNode>& identifier = info["IDENT"];
+  ptrVec<ASTNode> res;
+
+  // get type
+  if (info.contains("var_type")) {
+    // var declaration
+    type = std::move(info["var_type"]);
+  } else {
+    type.push_back(std::make_unique<StorageAST>("void"));
+  }
+
+  // fill in params and block if a function declaration
+
+  if (info.contains("decl'")) {
+    std::unique_ptr<PartialFuncDeclAST> halfBakedFuncDecl;
+
+    castToDerived<ASTNode, PartialFuncDeclAST>(info["decl'"], halfBakedFuncDecl);
+
+    if (halfBakedFuncDecl->block.empty()) {
+      // variable declaration
+      res.push_back(std::make_unique<VarDeclAST>(std::move(type), std::move(identifier)));
+    } else {
+      // half baked from decl' with params and block
+      // now add type and identifier
+      res.push_back(std::make_unique<FuncDeclAST>(std::move(type), std::move(identifier), std::move(halfBakedFuncDecl->params), std::move(halfBakedFuncDecl->block)));
+    }
+
+  } else if (info.contains("params")) {
+    // build a whole new func decl AST here
+    res.push_back(std::make_unique<FuncDeclAST>(std::move(type), std::move(identifier), std::move(info["params"]), std::move(info["block"])));
+  }
+
+  return res;
+}
+
+// decl' ::= "(" params ")" block
+// decl' ::= ";"
+ptrVec<ASTNode> decl_prime() {
+  nonTerminalInfo info = nonterminal("decl'");
+  ptrVec<ASTNode> res;
+
+  if (info.contains(";")) {
+    // variable decl, push an empty func decl ast to signal this
+    res.push_back(std::make_unique<PartialFuncDeclAST>());
+  } else {
+    // pass a half baked func decl back up
+    res.push_back(std::make_unique<PartialFuncDeclAST>(std::move(info["params"]), std::move(info["block"])));
+  }
+
+  return res;
+}
+
+ptrVec<ASTNode> type_spec() {
+  nonTerminalInfo info = nonterminal("type_spec");
+
+  if (info.contains("var_type")) {
+    return std::move(info["var_type"]);
+  } else {
+    return std::move(info["void"]);
+  }
+}
+
+ptrVec<ASTNode> var_type() {
+  nonTerminalInfo info = nonterminal("var_type");
+  auto it = info.begin();
+  return std::move(it->second);
+}
+
+ptrVec<ASTNode> params() {
+  nonTerminalInfo info = nonterminal("params");
+
+  // in minic, no parameters and 'void' mean the same thing
+  if (info.size() == 0 || info.contains("void")) {
+    return ptrVec<ASTNode>{};
+  } else {
+    return std::move(info["param_list"]);
+  }
+}
+
+ptrVec<ASTNode> param_list() {
+  nonTerminalInfo info = nonterminal("param_list");
+
+  ptrVec<ASTNode> paramList = std::move(info["param_list'"]);
+
+  paramList.push_back(std::move(info["param"][0]));
+
+  return paramList;
+}
+
+ptrVec<ASTNode> param_list_prime() {
+  nonTerminalInfo info = nonterminal("param_list'");
+  if (info.size() == 0) {
+    return ptrVec<ASTNode>{};
+  }
+  ptrVec<ASTNode> paramList = std::move(info["param_list'"]);
+
+  paramList.push_back(std::move(info["param"][0]));
+
+  return paramList;
+}
+
+ptrVec<ASTNode> param() {
+  nonTerminalInfo info = nonterminal("param");
+  ptrVec<ASTNode> temp;
+  temp.push_back(std::make_unique<ParamAST>(std::move(info["var_type"]), std::move(info["IDENT"])));
+  return temp;
+}
+
+ptrVec<ASTNode> block() {
+  nonTerminalInfo info = nonterminal("block");
+
+  ptrVec<ASTNode> temp;
+  temp.push_back(std::make_unique<BlockAST>(std::move(info["local_decls"]), std::move(info["stmt_list"])));
+  return temp;
+}
+
+ptrVec<ASTNode> local_decls() {
+  nonTerminalInfo info = nonterminal("local_decls");
+
+  if (info.size() == 0) {
+    return ptrVec<ASTNode>{};
+  }
+
+  ptrVec<ASTNode> localDecls = std::move(info["local_decls"]);
+
+  localDecls.push_back(std::move(info["local_decl"][0]));
+  return localDecls;
+}
+
+ptrVec<ASTNode> local_decl() {
+  nonTerminalInfo info = nonterminal("local_decl");
+
+  ptrVec<ASTNode> temp;
+  temp.push_back(std::make_unique<VarDeclAST>(std::move(info["var_type"]), std::move(info["IDENT"])));
+  return temp;
+}
+
+ptrVec<ASTNode> stmt_list() {
+  nonTerminalInfo info = nonterminal("stmt_list");
+
+  if (info.size() == 0) {
+    return ptrVec<ASTNode>{};
+  }
+
+  ptrVec<ASTNode> stmts = std::move(info["stmt_list'"]);
+  stmts.push_back(std::move(info["stmt"][0]));
+
+  return stmts;
+}
+
+ptrVec<ASTNode> stmt_list_prime() {
+  nonTerminalInfo info = nonterminal("stmt_list'");
+
+  if (info.size() == 0) {
+    return ptrVec<ASTNode>{};
+  }
+
+  ptrVec<ASTNode> stmtList = std::move(info["stmt_list'"]);
+
+  stmtList.push_back(std::move(info["stmt"][0]));
+
+  return stmtList;
+}
+
+ptrVec<ASTNode> stmt() {}
 
 static void parser() {}
 
@@ -667,7 +944,11 @@ inline llvm::raw_ostream& operator<<(llvm::raw_ostream& os, const ASTNode& ast) 
 
 //--------------
 
-static void initialiseFunctionMap() {}
+static void initialiseFunctionMap() {
+  functionMap["extern"] = extern_;
+  functionMap["extern_list'"] = extern_list_prime;
+  functionMap["extern_list"] = extern_list;
+};
 
 //---------------
 
@@ -676,6 +957,7 @@ static void initialiseFunctionMap() {}
 //===----------------------------------------------------------------------===//
 
 int main(int argc, char** argv) {
+
   if (argc == 2) {
     pFile = fopen(argv[1], "r");
     if (pFile == NULL)
@@ -704,7 +986,7 @@ int main(int argc, char** argv) {
   computeFollow();
   printFollow();
 
-  initialiseFunctionMap();
+  //initialiseFunctionMap(); 
 
   return 0;
 

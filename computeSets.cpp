@@ -1,16 +1,15 @@
+#include "computeSets.hpp"
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
-#include <unordered_set>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
-#include "computeSets.hpp"
 
 std::string endOfFile = "EOF";
 std::string cyclical = "_CYCLICAL";
-
 
 bool nullable(const std::string& input, std::string current = "");
 std::vector<std::string> splitString(const std::string& str, const std::string& delimiter);
@@ -180,7 +179,6 @@ std::unordered_set<std::string> first(const std::string& input) {
     return thisFirst;
   }
 
-
   auto find = productions.find(input);
   if (find == productions.end()) {
     std::cout << " (first) couldnt find: " + input << std::endl;
@@ -341,18 +339,7 @@ void readGrammar(std::string filename) {
 
       productions[input].push_back(rhs);
     }
-    std::cout << line << '\n';
+    std::cout << line << std::endl;
   }
   file.close();
 }
-
-/* int main() {
-
-  readGrammar("grammar.txt");
-
-  computeFirst();
-  printFirst();
-  computeFollow();
-  printFollow();
-  return 0;
-} */
