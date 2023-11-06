@@ -520,14 +520,14 @@ public:
   std::string name;
   std::unique_ptr<ExprAST> expression;
 
-  VarAssignAST(std::string name, ptrVec<ASTNode> expression) : name(name) { castToDerived<ASTNode, ExprAST>(expression, this->expression); };
+  VarAssignAST(std::string name, ptrVec<ASTNode>&& expression) : name(name) { castToDerived<ASTNode, ExprAST>(expression, this->expression); };
 };
 
 class ExprStmtAST : public StmtAST {
 public:
   std::unique_ptr<ExprAST> expression;
 
-  ExprStmtAST(ptrVec<ASTNode> expression) { castToDerived<ASTNode, ExprAST>(expression, this->expression); };
+  ExprStmtAST(ptrVec<ASTNode>&& expression) { castToDerived<ASTNode, ExprAST>(expression, this->expression); };
   ExprStmtAST(){};
 };
 
@@ -537,7 +537,7 @@ public:
   std::unique_ptr<BlockAST> body;
   std::unique_ptr<BlockAST> elseBody;
 
-  IfAST(ptrVec<ASTNode> expression, ptrVec<ASTNode> body, ptrVec<ASTNode> elseBody) {
+  IfAST(ptrVec<ASTNode>&& expression, ptrVec<ASTNode>&& body, ptrVec<ASTNode>&& elseBody) {
     castToDerived<ASTNode, ExprAST>(expression, this->expression);
     castToDerived<ASTNode, BlockAST>(body, this->body);
     castToDerived<ASTNode, BlockAST>(elseBody, this->elseBody);
@@ -549,7 +549,7 @@ public:
   std::unique_ptr<ExprAST> expression;
   std::unique_ptr<StmtAST> stmt;
 
-  WhileAST(ptrVec<ASTNode> expression, ptrVec<ASTNode> stmt) {
+  WhileAST(ptrVec<ASTNode>&& expression, ptrVec<ASTNode>&& stmt) {
     castToDerived<ASTNode, ExprAST>(expression, this->expression);
     castToDerived<ASTNode, StmtAST>(stmt, this->stmt);
   };
@@ -559,20 +559,23 @@ class ReturnAST : public StmtAST {
 public:
   std::unique_ptr<ExprAST> expression;
 
-  ReturnAST(ptrVec<ASTNode> expression) { castToDerived<ASTNode, ExprAST>(expression, this->expression); };
+  ReturnAST(ptrVec<ASTNode>&& expression) { castToDerived<ASTNode, ExprAST>(expression, this->expression); };
   ReturnAST(){};
 };
 
 class BinOpAST : public ExprAST {
 public:
   std::string op;
-  std::unique_ptr<ASTNode> left;
-  std::unique_ptr<ASTNode> right;
+  std::shared_ptr<ASTNode> left;
+  std::shared_ptr<ASTNode> right;
+  std::shared_ptr<BinOpAST> leftmostChild;
 
-  BinOpAST(std::string op, ptrVec<ASTNode> left, ptrVec<ASTNode> right) : op(op) {
+  BinOpAST(std::string op, ptrVec<ASTNode>&& left, ptrVec<ASTNode>&& right) : op(op) {
     this->left = std::move(left[0]);
     this->right = std::move(right[0]);
   };
+
+  BinOpAST(std::string op, ptrVec<ASTNode>&& right) : op(op) { this->right = std::move(right[0]); };
 };
 
 class BlockAST : public StmtAST {
@@ -616,6 +619,11 @@ public:
 
   std::string to_string() const {}
   Value* codegen() {}
+};
+
+class FactorAST : public ExprAST {
+public:
+  
 };
 
 class PartialFuncDeclAST : public ASTNode {
@@ -1062,43 +1070,126 @@ ptrVec<ASTNode> expr() {
   nonTerminalInfo info = nonterminal("expr");
 
   ptrVec<ASTNode> res;
-  if(info.contains("IDENT")){
+  if (info.contains("IDENT")) {
     res.push_back(std::make_unique<VarAssignAST>(std::move(info["IDENT"]), std::move(info["expr"])));
+  } else {
+    // res.push_back(std::make_unique<BinOpAST>(std::move(info[""])))
   }
-  else{
-    //res.push_back(std::make_unique<BinOpAST>(std::move(info[""])))
-  }
-  
 
   return res;
 }
 
-//rval ::= and_exp rval_or'
-//rval_or' ::= "||" and_exp rval_or'
-//rval_or' ::= ''
-ptrVec<ASTNode> rval(){
-  nonTerminalInfo info = nonterminal("rval");
+ptrVec<ASTNode> binOp_expTemplate(std::string prodName){
+  nonTerminalInfo info = nonterminal(prodName);
+  auto firstPos = info.begin();
+  auto secondPos = std::next(firstPos);
 
-  ptrVec<ASTNode>& left = info["and_exp"];
+  std::unique_ptr<BinOpAST> totalParent;
+  castToDerived<ASTNode, BinOpAST>(secondPos->second, totalParent);
+
+  totalParent->leftmostChild->left = std::move(firstPos->second[0]);
+
   ptrVec<ASTNode> res;
-
-  res.push_back(std::make_unique<BinOpAST>("||", std::move(left), std::move(info["rval_or'"])));
+  res.push_back(std::move(totalParent));
+  return res;
 }
 
-==rval_or' ::= "||" and_exp rval_or'
-rval_or' ::= ''
-ptrVec<ASTNode> rval_or_prime(){
-  nonTerminalInfo info = nonterminal("rval_or'");
+ptrVec<ASTNode> binOp_primeTemplate(std::string prodName){
+  nonTerminalInfo info = nonterminal(prodName);
 
-  if(info.size() == 0){
+  // epsilon production
+  if (info.size() == 0) {
     return ptrVec<ASTNode>{};
   }
 
-  ptrVec<ASTNode>& right = info["and_exp"];
-  ptrVec<ASTNode> res;
+  auto firstPos = info.begin();
+  auto secondPos = std::next(firstPos);
+  auto thirdPos = std::next(secondPos);
 
-  res.push_back(std::make_unique<BinOpAST>("||", std::move(left), std::move(info["rval_or'"])));
+  std::unique_ptr<BinOpAST> parent;
+  castToDerived<ASTNode, BinOpAST>(thirdPos->second, parent);
+
+  std::shared_ptr<BinOpAST> leftChild = std::make_unique<BinOpAST>(firstPos->first, std::move(secondPos->second));
+
+  if (!parent) {
+    parent = std::move(leftChild);
+  } else {
+    if (!parent->leftmostChild) {
+      parent->left = std::move(leftChild);
+    }
+    else {
+      parent->leftmostChild->left = leftChild;
+    }
+    parent->leftmostChild = leftChild;
+  }
+
+  ptrVec<ASTNode> res;
+  // return back up the overall parent
+  res.push_back(std::move(parent));
+
+  return res;
 }
+
+// rval_or ::= and_exp rval_or'
+ptrVec<ASTNode> rval_or() {
+  return binOp_expTemplate("rval_or");
+}
+
+// rval_or' ::= "||" and_exp rval_or'
+// rval_or' ::= ''
+ptrVec<ASTNode> rval_or_prime() {
+  return binOp_primeTemplate("rval_or'");
+}
+
+ptrVec<ASTNode> and_exp() {
+  return binOp_expTemplate("and_exp");
+}
+
+ptrVec<ASTNode> and_exp_prime() {
+  return binOp_primeTemplate("and_exp'");
+}
+
+ptrVec<ASTNode> equality_exp() {
+  return binOp_expTemplate("equality_exp");
+}
+
+ptrVec<ASTNode> equality_exp_prime() {
+  return binOp_primeTemplate("equality_exp'");
+}
+
+ptrVec<ASTNode> relational_exp() {
+  return binOp_expTemplate("relational_exp");
+}
+
+ptrVec<ASTNode> relational_exp_prime() {
+  return binOp_primeTemplate("relational_exp'");
+}
+
+ptrVec<ASTNode> additive_exp() {
+  return binOp_expTemplate("additive_exp");
+}
+
+ptrVec<ASTNode> additive_exp_prime() {
+  return binOp_primeTemplate("additive_exp'");
+}
+
+ptrVec<ASTNode> multiplicative_exp() {
+  return binOp_expTemplate("multiplicative_exp");
+}
+
+ptrVec<ASTNode> multiplicative_exp_prime() {
+  return binOp_primeTemplate("multiplicative_exp'");
+}
+
+ptrVec<ASTNode> multiplicative_exp() {
+  return binOp_expTemplate("multiplicative_exp");
+}
+
+ptrVec<ASTNode> multiplicative_exp_prime() {
+  return binOp_primeTemplate("multiplicative_exp'");
+}
+
+
 
 
 static void parser() {}

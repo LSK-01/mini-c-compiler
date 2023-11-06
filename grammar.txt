@@ -66,18 +66,19 @@ if_stmt ::= "if" "(" expr ")" block else_stmt
 else_stmt ::= "else" block
 else_stmt ::= ''
 
-return_stmt ::= "return" return_stmt'
-
-return_stmt' ::= ";" | expr ";"
+return_stmt ::= "return" ";"
+return_stmt ::= "return" expr ";"
 
 expr ::= IDENT "=" expr
 expr ::= rval
 
 rval ::= and_exp rval_or'
+
 rval_or' ::= "||" and_exp rval_or'
 rval_or' ::= ''
 
 and_exp ::= equality_exp and_exp'
+
 and_exp' ::= "&&" equality_exp and_exp'
 and_exp' ::= ''
 
