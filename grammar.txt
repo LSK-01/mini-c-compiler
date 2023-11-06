@@ -67,6 +67,7 @@ else_stmt ::= "else" block
 else_stmt ::= ''
 
 return_stmt ::= "return" return_stmt'
+
 return_stmt' ::= ";" | expr ";"
 
 expr ::= IDENT "=" expr
