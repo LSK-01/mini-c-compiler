@@ -9,6 +9,7 @@ void computeFirst();
 void printFirst();
 void printFollow(); 
 void computeFollow();
+std::string removeCharacter(std::string str, char char_to_remove);
 void readGrammar(std::string filename);
 bool isTerminal(const std::string& str);
 

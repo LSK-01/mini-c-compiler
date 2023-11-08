@@ -70,9 +70,9 @@ return_stmt ::= "return" ";"
 return_stmt ::= "return" expr ";"
 
 expr ::= IDENT "=" expr
-expr ::= rval
+expr ::= rval_or
 
-rval ::= and_exp rval_or'
+rval_or ::= and_exp rval_or'
 
 rval_or' ::= "||" and_exp rval_or'
 rval_or' ::= ''
@@ -83,11 +83,13 @@ and_exp' ::= "&&" equality_exp and_exp'
 and_exp' ::= ''
 
 equality_exp ::= relational_exp equality_exp'
+
 equality_exp' ::= "==" relational_exp equality_exp'
 equality_exp' ::= "!=" relational_exp equality_exp'
 equality_exp' ::= ''
 
 relational_exp ::= additive_exp relational_exp'
+
 relational_exp' ::= "<=" additive_exp relational_exp'
 relational_exp' ::= "<" additive_exp relational_exp'
 relational_exp' ::= ">=" additive_exp relational_exp'
@@ -95,11 +97,13 @@ relational_exp' ::= ">" additive_exp relational_exp'
 relational_exp' ::= ''
 
 additive_exp ::= multiplicative_exp additive_exp'
+
 additive_exp' ::= "+" multiplicative_exp additive_exp'
 additive_exp' ::= "-" multiplicative_exp additive_exp'
 additive_exp' ::= ''
 
 multiplicative_exp ::= factor multiplicative_exp'
+
 multiplicative_exp' ::= "*" factor multiplicative_exp'
 multiplicative_exp' ::= "/" factor multiplicative_exp'
 multiplicative_exp' ::= "%" factor multiplicative_exp'

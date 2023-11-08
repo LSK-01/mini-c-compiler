@@ -409,7 +409,14 @@ static TOKEN peekNext() {
 // useless af currently
 static void putBackToken(TOKEN tok) { tok_buffer.push_front(tok); }
 
-static void throwError(const std::unordered_set<std::string>& expected, std::string message = "") { throw std::runtime_error("error: " + message); }
+static void throwError(const std::unordered_set<std::string>& expected, std::string message = "") {
+  std::cout << "error: " << message << std::endl;
+  std::cout << "expected: " << std::endl;
+  for (const auto& element : expected) {
+    std::cout << element << ' ';
+  }
+  throw std::runtime_error(message);
+}
 //===----------------------------------------------------------------------===//
 // AST nodes
 //===----------------------------------------------------------------------===//
@@ -418,7 +425,7 @@ template <typename T> using ptrVec = std::vector<std::unique_ptr<T>>;
 
 // we also reverse when casting a vector of pointers to another vector due to the way we build up our left recursions backwards
 template <typename Base, typename Derived> void castToDerived(std::vector<std::unique_ptr<Base>>& nodes, std::vector<std::unique_ptr<Derived>>& target) {
-  for (int i = nodes.size() - 1; i >= 0; i++) {
+  for (int i = nodes.size() - 1; i >= 0; i--) {
     auto& node = nodes[i];
     Derived* derivedPtr = static_cast<Derived*>(node.release());
     target.push_back(std::unique_ptr<Derived>(derivedPtr));
@@ -454,16 +461,21 @@ public:
   virtual std::string to_string() const { return ""; };
 };
 
-/// IntASTNode - Class for integer literals like 1, 2, 10,
-class IntAST : public ASTNode {
-  int Val;
-  TOKEN Tok;
-  std::string Name;
+class ExprAST : public ASTNode {};
 
+class NegationAST : public ExprAST {
 public:
-  IntAST(TOKEN tok, int val) : Val(val), Tok(tok){};
-  virtual Value* codegen() override;
-  virtual std::string to_string() const override { return std::to_string(Val); };
+  std::unique_ptr<ExprAST> child;
+  std::string symbol;
+  NegationAST(std::string symbol, ptrVec<ASTNode>&& child) : symbol(symbol) { castToDerived<ASTNode, ExprAST>(child, this->child); };
+  virtual Value* codegen() override{};
+  virtual std::string to_string() const override{};
+};
+
+class PrimaryAST : public ExprAST {
+public:
+  virtual Value* codegen() override{};
+  virtual std::string to_string() const override{};
 };
 
 class StorageAST : public ASTNode {
@@ -471,7 +483,85 @@ class StorageAST : public ASTNode {
 public:
   std::string value;
   StorageAST(std::string value) : value(value){};
-  Value* codegen() {}
+  virtual Value* codegen() override{};
+  virtual std::string to_string() const override{};
+};
+
+/// IntASTNode - Class for integer literals like 1, 2, 10,
+class IntAST : public PrimaryAST {
+  int Val;
+
+public:
+  IntAST(ptrVec<ASTNode>&& value) {
+    std::unique_ptr<StorageAST> valueStorage;
+
+    castToDerived<ASTNode, StorageAST>(value, valueStorage);
+    this->Val = std::stoi(valueStorage->value);
+  };
+  virtual Value* codegen() override{};
+  virtual std::string to_string() const override{};
+};
+
+class FloatAST : public PrimaryAST {
+  float Val;
+
+public:
+  FloatAST(ptrVec<ASTNode>&& value) {
+    std::unique_ptr<StorageAST> valueStorage;
+
+    castToDerived<ASTNode, StorageAST>(value, valueStorage);
+    this->Val = std::stof(valueStorage->value);
+  };
+  virtual Value* codegen() override{};
+  virtual std::string to_string() const override{};
+};
+
+class BoolAST : public PrimaryAST {
+  bool Val;
+
+public:
+  BoolAST(ptrVec<ASTNode>&& value) {
+    std::unique_ptr<StorageAST> valueStorage;
+
+    castToDerived<ASTNode, StorageAST>(value, valueStorage);
+    if (valueStorage->value == "false") {
+      Val = false;
+    } else {
+      Val = true;
+    }
+  };
+  virtual Value* codegen() override{};
+  virtual std::string to_string() const override{};
+};
+
+class FuncCallAST : public PrimaryAST {
+  std::string name;
+  std::vector<std::unique_ptr<ExprAST>> args;
+
+public:
+  FuncCallAST(ptrVec<ASTNode>&& name, ptrVec<ASTNode>&& args) {
+    castToDerived<ASTNode, ExprAST>(args, this->args);
+
+    std::unique_ptr<StorageAST> nameStorage;
+    castToDerived<ASTNode, StorageAST>(name, nameStorage);
+    this->name = nameStorage->value;
+  };
+
+  virtual Value* codegen() override{};
+  virtual std::string to_string() const override{};
+};
+
+class VarCallAST : public PrimaryAST {
+public:
+  std::string name;
+  VarCallAST(ptrVec<ASTNode> name) {
+    std::unique_ptr<StorageAST> nameStorage;
+
+    castToDerived<ASTNode, StorageAST>(name, nameStorage);
+    this->name = nameStorage->value;
+  };
+  virtual Value* codegen() override{};
+  virtual std::string to_string() const override{};
 };
 
 class DeclAST : public ASTNode {
@@ -493,74 +583,8 @@ public:
 
   DeclAST(){};
 
-  std::string to_string() const {}
-  virtual Value* codegen() {}
-};
-
-class VarDeclAST : public DeclAST {
-public:
-  VarDeclAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name) : DeclAST(std::move(type), std::move(name)){};
-  std::string to_string() const {}
-  Value* codegen() {}
-};
-
-class ParamAST : public VarDeclAST {
-public:
-  ParamAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name) : VarDeclAST(std::move(type), std::move(name)){};
-  std::string to_string() const {}
-  Value* codegen() {}
-};
-
-class StmtAST : public ASTNode {};
-
-class ExprAST : public ASTNode {};
-
-class VarAssignAST : public ExprAST {
-public:
-  std::string name;
-  std::unique_ptr<ExprAST> expression;
-
-  VarAssignAST(std::string name, ptrVec<ASTNode>&& expression) : name(name) { castToDerived<ASTNode, ExprAST>(expression, this->expression); };
-};
-
-class ExprStmtAST : public StmtAST {
-public:
-  std::unique_ptr<ExprAST> expression;
-
-  ExprStmtAST(ptrVec<ASTNode>&& expression) { castToDerived<ASTNode, ExprAST>(expression, this->expression); };
-  ExprStmtAST(){};
-};
-
-class IfAST : public StmtAST {
-public:
-  std::unique_ptr<ExprAST> expression;
-  std::unique_ptr<BlockAST> body;
-  std::unique_ptr<BlockAST> elseBody;
-
-  IfAST(ptrVec<ASTNode>&& expression, ptrVec<ASTNode>&& body, ptrVec<ASTNode>&& elseBody) {
-    castToDerived<ASTNode, ExprAST>(expression, this->expression);
-    castToDerived<ASTNode, BlockAST>(body, this->body);
-    castToDerived<ASTNode, BlockAST>(elseBody, this->elseBody);
-  };
-};
-
-class WhileAST : public StmtAST {
-public:
-  std::unique_ptr<ExprAST> expression;
-  std::unique_ptr<StmtAST> stmt;
-
-  WhileAST(ptrVec<ASTNode>&& expression, ptrVec<ASTNode>&& stmt) {
-    castToDerived<ASTNode, ExprAST>(expression, this->expression);
-    castToDerived<ASTNode, StmtAST>(stmt, this->stmt);
-  };
-};
-
-class ReturnAST : public StmtAST {
-public:
-  std::unique_ptr<ExprAST> expression;
-
-  ReturnAST(ptrVec<ASTNode>&& expression) { castToDerived<ASTNode, ExprAST>(expression, this->expression); };
-  ReturnAST(){};
+  virtual Value* codegen() override{};
+  virtual std::string to_string() const override{};
 };
 
 class BinOpAST : public ExprAST {
@@ -576,6 +600,51 @@ public:
   };
 
   BinOpAST(std::string op, ptrVec<ASTNode>&& right) : op(op) { this->right = std::move(right[0]); };
+  virtual Value* codegen() override{};
+  virtual std::string to_string() const override{};
+};
+
+class VarDeclAST : public DeclAST {
+public:
+  VarDeclAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name) : DeclAST(std::move(type), std::move(name)){};
+  virtual Value* codegen() override{};
+  virtual std::string to_string() const override{};
+};
+
+class ParamAST : public VarDeclAST {
+public:
+  ParamAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name) : VarDeclAST(std::move(type), std::move(name)){};
+  virtual Value* codegen() override{};
+  virtual std::string to_string() const override{};
+};
+
+class VarAssignAST : public ExprAST {
+public:
+  std::string name;
+  std::unique_ptr<ExprAST> expression;
+
+  VarAssignAST(ptrVec<ASTNode>&& name, ptrVec<ASTNode>&& expression) {
+    castToDerived<ASTNode, ExprAST>(expression, this->expression);
+
+    std::unique_ptr<StorageAST> nameStorage;
+    castToDerived<ASTNode, StorageAST>(name, nameStorage);
+    this->name = nameStorage->value;
+  };
+  virtual Value* codegen() override{};
+  virtual std::string to_string() const override{};
+};
+
+class StmtAST : public ASTNode {};
+
+class ExprStmtAST : public StmtAST {
+public:
+  std::unique_ptr<ExprAST> expression;
+
+  ExprStmtAST(ptrVec<ASTNode>&& expression) { castToDerived<ASTNode, ExprAST>(expression, this->expression); };
+  ExprStmtAST(){};
+
+  virtual Value* codegen() override{};
+  virtual std::string to_string() const override{};
 };
 
 class BlockAST : public StmtAST {
@@ -587,8 +656,49 @@ public:
     castToDerived<ASTNode, VarDeclAST>(localDecls, this->localDecls);
     castToDerived<ASTNode, StmtAST>(stmts, this->stmts);
   }
-  std::string to_string() const {}
-  Value* codegen() {}
+  virtual Value* codegen() override{};
+  virtual std::string to_string() const override{};
+};
+
+class IfAST : public StmtAST {
+public:
+  std::unique_ptr<ExprAST> expression;
+  std::unique_ptr<BlockAST> body;
+  std::unique_ptr<BlockAST> elseBody;
+
+  IfAST(ptrVec<ASTNode>&& expression, ptrVec<ASTNode>&& body, ptrVec<ASTNode>&& elseBody) {
+    castToDerived<ASTNode, ExprAST>(expression, this->expression);
+    castToDerived<ASTNode, BlockAST>(body, this->body);
+    castToDerived<ASTNode, BlockAST>(elseBody, this->elseBody);
+  };
+
+  virtual Value* codegen() override{};
+  virtual std::string to_string() const override{};
+};
+
+class WhileAST : public StmtAST {
+public:
+  std::unique_ptr<ExprAST> expression;
+  std::unique_ptr<StmtAST> stmt;
+
+  WhileAST(ptrVec<ASTNode>&& expression, ptrVec<ASTNode>&& stmt) {
+    castToDerived<ASTNode, ExprAST>(expression, this->expression);
+    castToDerived<ASTNode, StmtAST>(stmt, this->stmt);
+  };
+
+  virtual Value* codegen() override{};
+  virtual std::string to_string() const override{};
+};
+
+class ReturnAST : public StmtAST {
+public:
+  std::unique_ptr<ExprAST> expression;
+
+  ReturnAST(ptrVec<ASTNode>&& expression) { castToDerived<ASTNode, ExprAST>(expression, this->expression); };
+  ReturnAST(){};
+
+  virtual Value* codegen() override{};
+  virtual std::string to_string() const override{};
 };
 
 class ExternAST : public ASTNode {
@@ -597,12 +707,21 @@ class ExternAST : public ASTNode {
   std::vector<std::unique_ptr<ParamAST>> params;
 
 public:
-  ExternAST(std::string type, std::string name, std::vector<std::unique_ptr<ASTNode>>&& params) : type(type), name(name) {
+  ExternAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name, std::vector<std::unique_ptr<ASTNode>>&& params) {
+    std::cout << "number of params: " + params.size() << " number of local params: " + this->params.size() << std::endl;
     castToDerived<ASTNode, ParamAST>(params, this->params);
+
+    std::unique_ptr<StorageAST> typeNode;
+    std::unique_ptr<StorageAST> identNode;
+    castToDerived<ASTNode, StorageAST>(type, typeNode);
+    castToDerived<ASTNode, StorageAST>(name, identNode);
+
+    this->name = identNode->value;
+    this->type = typeNode->value;
   };
 
-  std::string to_string() const {}
-  Value* codegen() {}
+  virtual Value* codegen() override{};
+  virtual std::string to_string() const override{};
 };
 
 class FuncDeclAST : public DeclAST {
@@ -617,13 +736,16 @@ public:
 
   FuncDeclAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name) : DeclAST(std::move(type), std::move(name)){};
 
-  std::string to_string() const {}
-  Value* codegen() {}
+  virtual Value* codegen() override{};
+  virtual std::string to_string() const override{};
 };
 
 class FactorAST : public ExprAST {
 public:
-  
+  std::unique_ptr<PrimaryAST> expression;
+  FactorAST(ptrVec<ASTNode> expression) { castToDerived<ASTNode, PrimaryAST>(expression, this->expression); };
+  virtual Value* codegen() override{};
+  virtual std::string to_string() const override{};
 };
 
 class PartialFuncDeclAST : public ASTNode {
@@ -635,7 +757,8 @@ public:
 
   PartialFuncDeclAST(){};
 
-  Value* codegen() {}
+  virtual Value* codegen() override{};
+  virtual std::string to_string() const override{};
 };
 
 class ProgramAST : public ASTNode {
@@ -659,7 +782,7 @@ public:
     std::cout << "}" << std::endl;
   }
 
-  Value* codegen() {}
+  virtual Value* codegen() override{};
 };
 
 std::unordered_map<std::string, std::function<std::vector<std::unique_ptr<ASTNode>>()>> functionMap;
@@ -718,12 +841,14 @@ nonTerminalInfo nonterminal(const std::string& name) {
         for (std::string symbol : rule) {
           // shouldn't be any overlap in firstSets (except for when we get to expr)
           // so this should only 'match' one rule
-          if (isTerminal(symbol) && (symbol == CurTok.lexeme || symbol == typeLiteralString)) {
+          typeLiteralString = typeToString.contains(CurTok.type) ? typeToString[CurTok.type] : "";
 
-            result[symbol].push_back(std::make_unique<StorageAST>(CurTok.lexeme));
+          std::string symbolNoQuotes = removeCharacter(symbol, '"');
+          if (isTerminal(symbol) && (symbolNoQuotes == CurTok.lexeme || symbolNoQuotes == typeLiteralString)) {
+
+            result[symbolNoQuotes].push_back(std::make_unique<StorageAST>(CurTok.lexeme));
 
             getNextToken();
-            typeLiteralString = typeToString.contains(CurTok.type) ? typeToString[CurTok.type] : "";
 
           } else if (!isTerminal(symbol)) {
             result[symbol] = functionMap[symbol]();
@@ -761,7 +886,9 @@ ptrVec<ASTNode> program() {
   getNextToken();
   nonTerminalInfo info = nonterminal("program");
 
-  return std::make_unique<ProgramAST>(std::move(info["extern_list"]), std::move(info["decl_list"]));
+  ptrVec<ASTNode> res;
+  res.push_back(std::make_unique<ProgramAST>(std::move(info["extern_list"]), std::move(info["decl_list"])));
+  return res;
 }
 
 // extern_list ::= extern extern_list'
@@ -795,13 +922,8 @@ ptrVec<ASTNode> extern_() {
 
   nonTerminalInfo info = nonterminal("extern");
 
-  ptrVec<StorageAST> typeNode;
-  ptrVec<StorageAST> identNode;
-  castToDerived<ASTNode, StorageAST>(info["type_spec"], typeNode);
-  castToDerived<ASTNode, StorageAST>(info["IDENT"], identNode);
-
   ptrVec<ASTNode> res;
-  res.push_back(std::make_unique<ExternAST>(typeNode[0]->value, identNode[0]->value, std::move(info["params"])));
+  res.push_back(std::make_unique<ExternAST>(std::move(info["type_spec"]), std::move(info["IDENT"]), std::move(info["params"])));
 
   return res;
 }
@@ -1073,28 +1195,34 @@ ptrVec<ASTNode> expr() {
   if (info.contains("IDENT")) {
     res.push_back(std::make_unique<VarAssignAST>(std::move(info["IDENT"]), std::move(info["expr"])));
   } else {
-    // res.push_back(std::make_unique<BinOpAST>(std::move(info[""])))
+    // BinOpExpr node is returned
+    res.push_back(std::move(info["rval_or"][0]));
   }
 
   return res;
 }
 
-ptrVec<ASTNode> binOp_expTemplate(std::string prodName){
+ptrVec<ASTNode> binOp_expTemplate(std::string prodName) {
   nonTerminalInfo info = nonterminal(prodName);
   auto firstPos = info.begin();
   auto secondPos = std::next(firstPos);
 
-  std::unique_ptr<BinOpAST> totalParent;
-  castToDerived<ASTNode, BinOpAST>(secondPos->second, totalParent);
-
-  totalParent->leftmostChild->left = std::move(firstPos->second[0]);
-
   ptrVec<ASTNode> res;
-  res.push_back(std::move(totalParent));
+
+  if (secondPos->second.empty()) {
+    res.push_back(std::move(firstPos->second[0]));
+  } else {
+    std::unique_ptr<BinOpAST> totalParent;
+    castToDerived<ASTNode, BinOpAST>(secondPos->second, totalParent);
+
+    totalParent->leftmostChild->left = std::move(firstPos->second[0]);
+    res.push_back(std::move(totalParent));
+  }
+
   return res;
 }
 
-ptrVec<ASTNode> binOp_primeTemplate(std::string prodName){
+ptrVec<ASTNode> binOp_primeTemplate(std::string prodName) {
   nonTerminalInfo info = nonterminal(prodName);
 
   // epsilon production
@@ -1109,18 +1237,20 @@ ptrVec<ASTNode> binOp_primeTemplate(std::string prodName){
   std::unique_ptr<BinOpAST> parent;
   castToDerived<ASTNode, BinOpAST>(thirdPos->second, parent);
 
-  std::shared_ptr<BinOpAST> leftChild = std::make_unique<BinOpAST>(firstPos->first, std::move(secondPos->second));
+  std::unique_ptr<BinOpAST> leftChild = std::make_unique<BinOpAST>(firstPos->first, std::move(secondPos->second));
 
   if (!parent) {
     parent = std::move(leftChild);
   } else {
     if (!parent->leftmostChild) {
       parent->left = std::move(leftChild);
+      std::shared_ptr<BinOpAST> derivedLeft = std::static_pointer_cast<BinOpAST>(parent->left);
+      parent->leftmostChild = derivedLeft;
+    } else {
+      parent->leftmostChild->left = std::move(leftChild);
+      std::shared_ptr<BinOpAST> derivedLeft = std::static_pointer_cast<BinOpAST>(parent->leftmostChild->left);
+      parent->leftmostChild = derivedLeft;
     }
-    else {
-      parent->leftmostChild->left = leftChild;
-    }
-    parent->leftmostChild = leftChild;
   }
 
   ptrVec<ASTNode> res;
@@ -1131,68 +1261,113 @@ ptrVec<ASTNode> binOp_primeTemplate(std::string prodName){
 }
 
 // rval_or ::= and_exp rval_or'
-ptrVec<ASTNode> rval_or() {
-  return binOp_expTemplate("rval_or");
-}
+ptrVec<ASTNode> rval_or() { return binOp_expTemplate("rval_or"); }
 
 // rval_or' ::= "||" and_exp rval_or'
 // rval_or' ::= ''
-ptrVec<ASTNode> rval_or_prime() {
-  return binOp_primeTemplate("rval_or'");
+ptrVec<ASTNode> rval_or_prime() { return binOp_primeTemplate("rval_or'"); }
+
+ptrVec<ASTNode> and_exp() { return binOp_expTemplate("and_exp"); }
+
+ptrVec<ASTNode> and_exp_prime() { return binOp_primeTemplate("and_exp'"); }
+
+ptrVec<ASTNode> equality_exp() { return binOp_expTemplate("equality_exp"); }
+
+ptrVec<ASTNode> equality_exp_prime() { return binOp_primeTemplate("equality_exp'"); }
+
+ptrVec<ASTNode> relational_exp() { return binOp_expTemplate("relational_exp"); }
+
+ptrVec<ASTNode> relational_exp_prime() { return binOp_primeTemplate("relational_exp'"); }
+
+ptrVec<ASTNode> additive_exp() { return binOp_expTemplate("additive_exp"); }
+
+ptrVec<ASTNode> additive_exp_prime() { return binOp_primeTemplate("additive_exp'"); }
+
+ptrVec<ASTNode> multiplicative_exp() { return binOp_expTemplate("multiplicative_exp"); }
+
+ptrVec<ASTNode> multiplicative_exp_prime() { return binOp_primeTemplate("multiplicative_exp'"); }
+
+ptrVec<ASTNode> factor() {
+  nonTerminalInfo info = nonterminal("factor");
+  ptrVec<ASTNode> res;
+
+  if (info.contains("primary")) {
+    res.push_back(std::make_unique<FactorAST>(std::move(info["primary"])));
+  } else {
+    std::string symbol = info.begin()->first;
+    res.push_back(std::make_unique<NegationAST>(symbol, std::move(info["factor"])));
+  }
+
+  return res;
 }
 
-ptrVec<ASTNode> and_exp() {
-  return binOp_expTemplate("and_exp");
+ptrVec<ASTNode> primary() {
+  nonTerminalInfo info = nonterminal("primary");
+  ptrVec<ASTNode> res;
+
+  if (info.contains("IDENT")) {
+    ptrVec<ASTNode>& ident = info["IDENT"];
+    if (info["primary'"].size() == 0) {
+      res.push_back(std::make_unique<VarCallAST>(std::move(ident)));
+    } else {
+      res.push_back(std::make_unique<FuncCallAST>(std::move(ident), std::move(info["primary'"])));
+    }
+  } else if (info.contains("INT_LIT")) {
+    res.push_back(std::make_unique<IntAST>(std::move(info["INT_LIT"])));
+  } else if (info.contains("FLOAT_LIT")) {
+    res.push_back(std::make_unique<FloatAST>(std::move(info["FLOAT_LIT"])));
+  } else if (info.contains("BOOL_LIT")) {
+    res.push_back(std::make_unique<BoolAST>(std::move(info["BOOL_LIT"])));
+  } else if (info.contains("expr")) {
+    res.push_back(std::move(info["expr"][0]));
+  }
+
+  return res;
 }
 
-ptrVec<ASTNode> and_exp_prime() {
-  return binOp_primeTemplate("and_exp'");
+ptrVec<ASTNode> primary_prime() {
+  nonTerminalInfo info = nonterminal("primary'");
+
+  if (info.size() == 0) {
+    return ptrVec<ASTNode>{};
+  }
+
+  return std::move(info["args"]);
 }
 
-ptrVec<ASTNode> equality_exp() {
-  return binOp_expTemplate("equality_exp");
+ptrVec<ASTNode> args() {
+  nonTerminalInfo info = nonterminal("args");
+
+  if (info.size() == 0) {
+    return ptrVec<ASTNode>{};
+  }
+
+  return std::move(info["arg_list'"]);
 }
 
-ptrVec<ASTNode> equality_exp_prime() {
-  return binOp_primeTemplate("equality_exp'");
+ptrVec<ASTNode> arg_list() {
+  nonTerminalInfo info = nonterminal("arg_list");
+
+  ptrVec<ASTNode> argList = std::move(info["arg_list'"]);
+  argList.push_back(std::move(info["expr"][0]));
+
+  return argList;
 }
 
-ptrVec<ASTNode> relational_exp() {
-  return binOp_expTemplate("relational_exp");
+ptrVec<ASTNode> arg_list_prime() {
+  nonTerminalInfo info = nonterminal("arg_list'");
+
+  if (info.size() == 0) {
+    return ptrVec<ASTNode>{};
+  }
+
+  ptrVec<ASTNode> argList = std::move(info["arg_list'"]);
+  argList.push_back(std::move(info["expr"][0]));
+
+  return argList;
 }
 
-ptrVec<ASTNode> relational_exp_prime() {
-  return binOp_primeTemplate("relational_exp'");
-}
-
-ptrVec<ASTNode> additive_exp() {
-  return binOp_expTemplate("additive_exp");
-}
-
-ptrVec<ASTNode> additive_exp_prime() {
-  return binOp_primeTemplate("additive_exp'");
-}
-
-ptrVec<ASTNode> multiplicative_exp() {
-  return binOp_expTemplate("multiplicative_exp");
-}
-
-ptrVec<ASTNode> multiplicative_exp_prime() {
-  return binOp_primeTemplate("multiplicative_exp'");
-}
-
-ptrVec<ASTNode> multiplicative_exp() {
-  return binOp_expTemplate("multiplicative_exp");
-}
-
-ptrVec<ASTNode> multiplicative_exp_prime() {
-  return binOp_primeTemplate("multiplicative_exp'");
-}
-
-
-
-
-static void parser() {}
+static void parser() { program(); }
 
 //===----------------------------------------------------------------------===//
 // Code Generation
@@ -1217,6 +1392,46 @@ static void initialiseFunctionMap() {
   functionMap["extern"] = extern_;
   functionMap["extern_list'"] = extern_list_prime;
   functionMap["extern_list"] = extern_list;
+  functionMap["decl_list'"] = decl_list_prime;
+  functionMap["decl_list"] = decl_list;
+  functionMap["decl'"] = decl_prime;
+  functionMap["decl"] = decl;
+  functionMap["type_spec"] = type_spec;
+  functionMap["var_type"] = var_type;
+  functionMap["params"] = params;
+  functionMap["param_list'"] = param_list_prime;
+  functionMap["param_list"] = param_list;
+  functionMap["param"] = param;
+  functionMap["block"] = block;
+  functionMap["local_decls"] = local_decls;
+  functionMap["local_decl"] = local_decl;
+  functionMap["stmt_list'"] = stmt_list_prime;
+  functionMap["stmt_list"] = stmt_list;
+  functionMap["stmt"] = stmt;
+  functionMap["expr_stmt"] = expr_stmt;
+  functionMap["while_stmt"] = while_stmt;
+  functionMap["if_stmt"] = if_stmt;
+  functionMap["else_stmt"] = else_stmt;
+  functionMap["return_stmt"] = return_stmt;
+  functionMap["expr"] = expr;
+  functionMap["rval_or"] = rval_or;
+  functionMap["rval_or'"] = rval_or_prime;
+  functionMap["and_exp"] = and_exp;
+  functionMap["and_exp'"] = and_exp_prime;
+  functionMap["equality_exp"] = equality_exp;
+  functionMap["equality_exp'"] = equality_exp_prime;
+  functionMap["relational_exp"] = relational_exp;
+  functionMap["relational_exp'"] = relational_exp_prime;
+  functionMap["additive_exp"] = additive_exp;
+  functionMap["additive_exp'"] = additive_exp_prime;
+  functionMap["factor"] = factor;
+  functionMap["multiplicative_exp"] = multiplicative_exp;
+  functionMap["multiplicative_exp'"] = multiplicative_exp_prime;
+  functionMap["primary"] = primary;
+  functionMap["primary'"] = primary_prime;
+  functionMap["args"] = args;
+  functionMap["arg_list'"] = arg_list_prime;
+  functionMap["arg_list"] = arg_list;
 };
 
 //---------------
@@ -1252,12 +1467,11 @@ int main(int argc, char** argv) {
 
   computeFirst();
   printFirst();
+
   computeFollow();
   printFollow();
 
-  // initialiseFunctionMap();
-
-  return 0;
+  initialiseFunctionMap();
 
   fprintf(stderr, "Lexer Finished\n");
 
@@ -1268,6 +1482,7 @@ int main(int argc, char** argv) {
   parser();
   fprintf(stderr, "Parsing Finished\n");
 
+  return 0;
   //********************* Start printing final IR **************************
   // Print out all of the generated code into a file called output.ll
   auto Filename = "output.ll";

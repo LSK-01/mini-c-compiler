@@ -20,10 +20,41 @@ std::unordered_map<std::string, std::unordered_set<std::string>> firstSets;
 std::unordered_map<std::string, std::unordered_set<std::string>> followSets;
 std::unordered_map<std::string, std::vector<std::vector<std::string>>> productions;
 
+std::string removeCharacter(std::string str, char char_to_remove) {
+    str.erase(std::remove(str.begin(), str.end(), char_to_remove), str.end());
+    return str;
+}
+
+void removeQuotesFromSets(std::unordered_map<std::string, std::unordered_set<std::string>>& sets) {
+    std::unordered_map<std::string, std::unordered_set<std::string>> updatedSets;
+
+    for (auto& pair : sets) {
+        // Remove quotes from key unless terminal
+        std::string newKey = pair.first;
+        if(!(pair.second.size() == 1 && pair.first == *pair.second.begin())){
+          newKey = removeCharacter(pair.first, '"');
+        }
+
+        std::unordered_set<std::string> newSet;
+        for (const std::string& value : pair.second) {
+            // Remove quotes from each value in the set
+            newSet.insert(removeCharacter(value, '"'));
+        }
+
+        // Insert the updated key and set into the new map
+        updatedSets[newKey] = newSet;
+    }
+
+    // Replace the old map with the updated map
+    sets = std::move(updatedSets);
+}
+
 void computeFirst() {
   for (const auto& prod : productions) {
     first(prod.first);
   }
+
+  removeQuotesFromSets(firstSets);
 }
 
 void printFirst() {
@@ -96,6 +127,8 @@ void computeFollow() {
   std::string startVar = "program";
   followSets[startVar].insert(endOfFile);
   sententialForms(startVar);
+
+  removeQuotesFromSets(followSets);
 }
 
 std::unordered_set<std::string> follow(const std::string& input, std::unordered_set<std::string> visited) {
