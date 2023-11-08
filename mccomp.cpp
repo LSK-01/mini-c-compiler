@@ -470,7 +470,12 @@ public:
   std::string symbol;
   NegationAST(std::string symbol, ptrVec<ASTNode>&& child) : symbol(symbol) { castToDerived<ASTNode, ExprAST>(child, this->child); };
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override{};
+  virtual std::string to_string() const override {
+    std::string str = "<Negation symbol='" + symbol + "'>";
+    str += child->to_string();
+    str += "</Negation>";
+    return str;
+  };
 };
 
 class PrimaryAST : public ExprAST {
@@ -500,7 +505,10 @@ public:
     this->Val = std::stoi(valueStorage->value);
   };
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override{};
+  virtual std::string to_string() const override {
+    std::string str = "<Int val='" + std::to_string(Val) + "'/>";
+    return str;
+  };
 };
 
 class FloatAST : public PrimaryAST {
@@ -514,7 +522,10 @@ public:
     this->Val = std::stof(valueStorage->value);
   };
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override{};
+  virtual std::string to_string() const override {
+    std::string str = "<Float val='" + std::to_string(Val) + "'/>";
+    return str;
+  };
 };
 
 class BoolAST : public PrimaryAST {
@@ -532,7 +543,10 @@ public:
     }
   };
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override{};
+  virtual std::string to_string() const override {
+    std::string str = "<Bool val='" + std::to_string(Val) + "'/>";
+    return str;
+  };
 };
 
 class FuncCallAST : public PrimaryAST {
@@ -549,7 +563,14 @@ public:
   };
 
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override{};
+  virtual std::string to_string() const override {
+    std::string str = "<FuncCall name='" + name + "'>";
+    for (auto& arg : args) {
+      str += arg->to_string();
+    }
+    str += "</FuncCall>";
+    return str;
+  };
 };
 
 class VarCallAST : public PrimaryAST {
@@ -562,7 +583,10 @@ public:
     this->name = nameStorage->value;
   };
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override{};
+  virtual std::string to_string() const override {
+    std::string str = "<VarCall name='" + name + "' />";
+    return str;
+  };
 };
 
 class DeclAST : public ASTNode {
@@ -585,7 +609,11 @@ public:
   DeclAST(){};
 
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override{};
+  virtual std::string to_string() const override {
+    std::string str = "<Decl type='" + type + "' name='" + name + "'>";
+    str += "</Decl>";
+    return str;
+  };
 };
 
 class BinOpAST : public ExprAST {
@@ -602,21 +630,35 @@ public:
 
   BinOpAST(std::string op, ptrVec<ASTNode>&& right) : op(op) { this->right = std::move(right[0]); };
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override{};
+  virtual std::string to_string() const override {
+    std::string str = "<BinOp op='" + op + "'>";
+    str += left->to_string();
+    str += right->to_string();
+    str += "</BinOp>";
+    return str;
+  };
 };
 
 class VarDeclAST : public DeclAST {
 public:
   VarDeclAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name) : DeclAST(std::move(type), std::move(name)){};
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override{};
+  virtual std::string to_string() const override {
+    std::string str = "<VarDecl type='" + type + "' name='" + name + "'>";
+    str += "</VarDecl>";
+    return str;
+  };
 };
 
 class ParamAST : public VarDeclAST {
 public:
   ParamAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name) : VarDeclAST(std::move(type), std::move(name)){};
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override{};
+  virtual std::string to_string() const override {
+    std::string str = "<Param type='" + type + "' name='" + name + "'>";
+    str += "</Param>";
+    return str;
+  };
 };
 
 class VarAssignAST : public ExprAST {
@@ -632,7 +674,12 @@ public:
     this->name = nameStorage->value;
   };
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override{};
+  virtual std::string to_string() const override {
+    std::string str = "<VarAssign name='" + name + "'>";
+    str += expression->to_string();
+    str += "</VarAssign>";
+    return str;
+  };
 };
 
 class StmtAST : public ASTNode {};
@@ -645,7 +692,12 @@ public:
   ExprStmtAST(){};
 
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override{};
+  virtual std::string to_string() const override {
+    std::string str = "<ExprStmt>";
+    str += expression->to_string();
+    str += "</ExprStmt>";
+    return str;
+  };
 };
 
 class BlockAST : public StmtAST {
@@ -658,7 +710,17 @@ public:
     castToDerived<ASTNode, StmtAST>(stmts, this->stmts);
   }
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override{};
+  virtual std::string to_string() const override {
+    std::string str = "<Block>";
+    for (auto& local : localDecls) {
+      str += local->to_string();
+    }
+    for (auto& s : stmts) {
+      str += s->to_string();
+    }
+    str += "</Block>";
+    return str;
+  };
 };
 
 class IfAST : public StmtAST {
@@ -674,7 +736,14 @@ public:
   };
 
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override{};
+  virtual std::string to_string() const override {
+    std::string str = "<If>";
+    str += expression->to_string();
+    str += body->to_string();
+    str += elseBody->to_string();
+    str += "</If>";
+    return str;
+  };
 };
 
 class WhileAST : public StmtAST {
@@ -688,7 +757,13 @@ public:
   };
 
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override{};
+  virtual std::string to_string() const override {
+    std::string str = "<While>";
+    str += expression->to_string();
+    str += stmt->to_string();
+    str += "</While>";
+    return str;
+  };
 };
 
 class ReturnAST : public StmtAST {
@@ -699,7 +774,13 @@ public:
   ReturnAST(){};
 
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override{};
+  virtual std::string to_string() const override {
+    std::string str = "<Return>";
+    str += expression->to_string();
+
+    str += "</Return>";
+    return str;
+  };
 };
 
 class ExternAST : public ASTNode {
@@ -709,7 +790,6 @@ class ExternAST : public ASTNode {
 
 public:
   ExternAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name, std::vector<std::unique_ptr<ASTNode>>&& params) {
-    std::cout << "number of params: " + params.size() << " number of local params: " + this->params.size() << std::endl;
     castToDerived<ASTNode, ParamAST>(params, this->params);
 
     std::unique_ptr<StorageAST> typeNode;
@@ -722,7 +802,15 @@ public:
   };
 
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override{};
+  virtual std::string to_string() const override {
+    std::string str = "<Extern type='" + type + "' name='" + name + "'>";
+    for (auto& param : params) {
+      str += param->to_string();
+    }
+
+    str += "</Extern>";
+    return str;
+  };
 };
 
 class FuncDeclAST : public DeclAST {
@@ -738,7 +826,18 @@ public:
   FuncDeclAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name) : DeclAST(std::move(type), std::move(name)){};
 
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override{};
+  virtual std::string to_string() const override {
+    std::string str = "<FuncDecl type='" + type + "' name='" + name + "'>";
+
+    for (auto& param : params) {
+      str += param->to_string();
+    }
+
+    str += block->to_string();
+    str += "</FuncDecl>";
+
+    return str;
+  };
 };
 
 class FactorAST : public ExprAST {
@@ -746,7 +845,7 @@ public:
   std::unique_ptr<PrimaryAST> expression;
   FactorAST(ptrVec<ASTNode> expression) { castToDerived<ASTNode, PrimaryAST>(expression, this->expression); };
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override{};
+  virtual std::string to_string() const override { return expression->to_string(); };
 };
 
 class PartialFuncDeclAST : public ASTNode {
@@ -773,14 +872,16 @@ public:
   }
 
   virtual std::string to_string() const override {
-    std::cout << "{" << std::endl;
+    std::string str = "<Program>";
     for (auto& externNode : externList) {
-      externNode->to_string();
+      str += externNode->to_string();
     }
     for (auto& declNode : declList) {
-      declNode->to_string();
+      str += declNode->to_string();
     }
-    std::cout << "}" << std::endl;
+    str += "</Program>";
+
+    return str;
   }
 
   virtual Value* codegen() override{};
@@ -854,7 +955,7 @@ nonTerminalInfo nonterminal(const std::string& name) {
           typeLiteralString = typeToString.contains(CurTok.type) ? typeToString[CurTok.type] : "";
 
           std::string symbolNoQuotes = removeCharacter(symbol, '"');
-          std::cout << "symbol: " + symbol << " currTok lexem: " + CurTok.lexeme <<  "poo " + CurTok.columnNo << std::endl;
+          std::cout << "symbol: " + symbol << " currTok lexem: " + CurTok.lexeme << "poo " + CurTok.columnNo << std::endl;
           if (isTerminal(symbol) && (symbolNoQuotes == CurTok.lexeme || symbolNoQuotes == typeLiteralString)) {
 
             result[symbolNoQuotes].push_back(std::make_unique<StorageAST>(CurTok.lexeme));
@@ -1207,7 +1308,6 @@ ptrVec<ASTNode> return_stmt_prime() {
   return res;
 }
 
-
 ptrVec<ASTNode> expr() {
   nonTerminalInfo info = nonterminal("expr");
 
@@ -1235,12 +1335,11 @@ ptrVec<ASTNode> binOp_expTemplate(std::string prodName, std::string secondTerm) 
     std::unique_ptr<BinOpAST> totalParent;
     castToDerived<ASTNode, BinOpAST>(second, totalParent);
 
-    if(!totalParent->leftmostChild){
+    if (!totalParent->leftmostChild) {
       totalParent->left = std::move(first[0]);
       std::shared_ptr<BinOpAST> derivedLeft = std::static_pointer_cast<BinOpAST>(totalParent->left);
       totalParent->leftmostChild = derivedLeft;
-    }
-    else{
+    } else {
       totalParent->leftmostChild->left = std::move(first[0]);
     }
 
@@ -1377,7 +1476,7 @@ ptrVec<ASTNode> args() {
     return ptrVec<ASTNode>{};
   }
 
-  return std::move(info["arg_list'"]);
+  return std::move(info["arg_list"]);
 }
 
 ptrVec<ASTNode> arg_list() {
@@ -1402,7 +1501,7 @@ ptrVec<ASTNode> arg_list_prime() {
   return argList;
 }
 
-static void parser() { program(); }
+static std::string parser() { return program()[0]->to_string(); }
 
 //===----------------------------------------------------------------------===//
 // Code Generation
@@ -1515,8 +1614,25 @@ int main(int argc, char** argv) {
   TheModule = std::make_unique<Module>("mini-c", TheContext);
 
   // Run the parser now.
-  parser();
+  std::string xmlString = parser();
   fprintf(stderr, "Parsing Finished\n");
+
+  std::string filepath = "stringrep.xml";
+
+  // Create an ofstream instance to write to the file
+  std::ofstream fileStream(filepath);
+
+  // Check if the file stream is open
+  if (fileStream.is_open()) {
+    // Write the JSON string to the file
+    fileStream << xmlString;
+    // Close the file stream
+    fileStream.close();
+    std::cout << "XML written to " << filepath << std::endl;
+  } else {
+    std::cerr << "Unable to open file for writing." << std::endl;
+    return 1;
+  }
 
   return 0;
   //********************* Start printing final IR **************************
