@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-std::string endOfFile = "EOF";
+std::string endOfFile = "0";
 std::string cyclical = "_CYCLICAL";
 
 bool nullable(const std::string& input, std::string current = "");

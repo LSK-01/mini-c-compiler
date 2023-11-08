@@ -409,12 +409,13 @@ static TOKEN peekNext() {
 // useless af currently
 static void putBackToken(TOKEN tok) { tok_buffer.push_front(tok); }
 
-static void throwError(const std::unordered_set<std::string>& expected, std::string message = "") {
+static void throwError(const std::unordered_set<std::string>& expected, std::string found, std::string message = "") {
   std::cout << "error: " << message << std::endl;
   std::cout << "expected: " << std::endl;
   for (const auto& element : expected) {
     std::cout << element << ' ';
   }
+  std::cout << "found: " + found << std::endl;
   throw std::runtime_error(message);
 }
 //===----------------------------------------------------------------------===//
@@ -772,7 +773,7 @@ public:
   }
 
   virtual std::string to_string() const override {
-    std::cout << "program: {" << std::endl;
+    std::cout << "{" << std::endl;
     for (auto& externNode : externList) {
       externNode->to_string();
     }
@@ -795,6 +796,14 @@ std::unordered_map<int, std::string> typeToString = {
 //===----------------------------------------------------------------------===//
 
 /* Add function calls for each production */
+void printMap(const std::map<std::string, std::vector<std::unique_ptr<ASTNode>>>& myMap) {
+  for (const auto& pair : myMap) {
+    const auto& key = pair.first;
+    const auto& nodeList = pair.second;
+
+    std::cout << "Key: " << key + " " << nodeList.size() << "\n";
+  }
+}
 
 using nonTerminalInfo = std::map<std::string, std::vector<std::unique_ptr<ASTNode>>>;
 
@@ -816,6 +825,7 @@ nonTerminalInfo nonterminal(const std::string& name) {
       // incase we need to use follow set n shit
       // this is assuming theres only one epsilon rule to choose (which there should be, most stuff is LL(1))
       if (firstSets[firstSymbol].contains("''")) {
+        std::cout << "epsilon runnin for: " + name << std::endl;
         epsilonRule = rule;
       }
 
@@ -844,17 +854,20 @@ nonTerminalInfo nonterminal(const std::string& name) {
           typeLiteralString = typeToString.contains(CurTok.type) ? typeToString[CurTok.type] : "";
 
           std::string symbolNoQuotes = removeCharacter(symbol, '"');
+          std::cout << "symbol: " + symbol << " currTok lexem: " + CurTok.lexeme <<  "poo " + CurTok.columnNo << std::endl;
           if (isTerminal(symbol) && (symbolNoQuotes == CurTok.lexeme || symbolNoQuotes == typeLiteralString)) {
 
             result[symbolNoQuotes].push_back(std::make_unique<StorageAST>(CurTok.lexeme));
-
             getNextToken();
+            std::cout << "got next tok: " + CurTok.lexeme << " poo :" + CurTok.columnNo << std::endl;
 
           } else if (!isTerminal(symbol)) {
+            std::cout << "pushing symbol: " + symbol << " for name: " + name << std::endl;
             result[symbol] = functionMap[symbol]();
+            printMap(result);
           } else {
             // symbol was a terminal but didnt match CurTok
-            throwError({symbol});
+            throwError({symbol}, CurTok.lexeme);
           }
         }
       }
@@ -868,11 +881,13 @@ nonTerminalInfo nonterminal(const std::string& name) {
       // see if we should use an available epsilon production
       //'using' the production just entails returning an empty result map for this nonterminal
       if (!(!epsilonRule.empty() && (followSets[name].contains(CurTok.lexeme) || followSets[name].contains(typeLiteralString)))) {
-        throwError(expected);
+        throwError(expected, CurTok.lexeme);
+      } else {
+        std::cout << "used epsilon rule " << std::endl;
       }
     }
   } else {
-    throwError({}, "Production not found for " + name);
+    throwError({}, CurTok.lexeme, "Production not found for " + name);
   }
 
   return result;
@@ -1174,9 +1189,13 @@ ptrVec<ASTNode> else_stmt() {
 
   return std::move(info["block"]);
 }
-
 ptrVec<ASTNode> return_stmt() {
   nonTerminalInfo info = nonterminal("return_stmt");
+  return std::move(info["return_stmt'"]);
+}
+
+ptrVec<ASTNode> return_stmt_prime() {
+  nonTerminalInfo info = nonterminal("return_stmt'");
 
   ptrVec<ASTNode> res;
   if (info.contains("expr")) {
@@ -1187,6 +1206,7 @@ ptrVec<ASTNode> return_stmt() {
 
   return res;
 }
+
 
 ptrVec<ASTNode> expr() {
   nonTerminalInfo info = nonterminal("expr");
@@ -1202,27 +1222,35 @@ ptrVec<ASTNode> expr() {
   return res;
 }
 
-ptrVec<ASTNode> binOp_expTemplate(std::string prodName) {
+ptrVec<ASTNode> binOp_expTemplate(std::string prodName, std::string secondTerm) {
   nonTerminalInfo info = nonterminal(prodName);
-  auto firstPos = info.begin();
-  auto secondPos = std::next(firstPos);
+  ptrVec<ASTNode>& first = info[secondTerm];
+  ptrVec<ASTNode>& second = info[prodName + "'"];
 
   ptrVec<ASTNode> res;
 
-  if (secondPos->second.empty()) {
-    res.push_back(std::move(firstPos->second[0]));
+  if (second.empty()) {
+    res = std::move(first);
   } else {
     std::unique_ptr<BinOpAST> totalParent;
-    castToDerived<ASTNode, BinOpAST>(secondPos->second, totalParent);
+    castToDerived<ASTNode, BinOpAST>(second, totalParent);
 
-    totalParent->leftmostChild->left = std::move(firstPos->second[0]);
+    if(!totalParent->leftmostChild){
+      totalParent->left = std::move(first[0]);
+      std::shared_ptr<BinOpAST> derivedLeft = std::static_pointer_cast<BinOpAST>(totalParent->left);
+      totalParent->leftmostChild = derivedLeft;
+    }
+    else{
+      totalParent->leftmostChild->left = std::move(first[0]);
+    }
+
     res.push_back(std::move(totalParent));
   }
 
   return res;
 }
 
-ptrVec<ASTNode> binOp_primeTemplate(std::string prodName) {
+ptrVec<ASTNode> binOp_primeTemplate(std::string prodName, std::string secondTerm) {
   nonTerminalInfo info = nonterminal(prodName);
 
   // epsilon production
@@ -1230,14 +1258,18 @@ ptrVec<ASTNode> binOp_primeTemplate(std::string prodName) {
     return ptrVec<ASTNode>{};
   }
 
-  auto firstPos = info.begin();
-  auto secondPos = std::next(firstPos);
-  auto thirdPos = std::next(secondPos);
+  ptrVec<ASTNode> second = std::move(info[secondTerm]);
+  info.erase(secondTerm);
+  ptrVec<ASTNode> third = std::move(info[prodName]);
+  info.erase(prodName);
+
+  // will now be the symbol
+  auto symbolPos = info.begin();
 
   std::unique_ptr<BinOpAST> parent;
-  castToDerived<ASTNode, BinOpAST>(thirdPos->second, parent);
+  castToDerived<ASTNode, BinOpAST>(third, parent);
 
-  std::unique_ptr<BinOpAST> leftChild = std::make_unique<BinOpAST>(firstPos->first, std::move(secondPos->second));
+  std::unique_ptr<BinOpAST> leftChild = std::make_unique<BinOpAST>(symbolPos->first, std::move(second));
 
   if (!parent) {
     parent = std::move(leftChild);
@@ -1261,31 +1293,31 @@ ptrVec<ASTNode> binOp_primeTemplate(std::string prodName) {
 }
 
 // rval_or ::= and_exp rval_or'
-ptrVec<ASTNode> rval_or() { return binOp_expTemplate("rval_or"); }
+ptrVec<ASTNode> rval_or() { return binOp_expTemplate("rval_or", "and_exp"); }
 
 // rval_or' ::= "||" and_exp rval_or'
 // rval_or' ::= ''
-ptrVec<ASTNode> rval_or_prime() { return binOp_primeTemplate("rval_or'"); }
+ptrVec<ASTNode> rval_or_prime() { return binOp_primeTemplate("rval_or'", "and_exp"); }
 
-ptrVec<ASTNode> and_exp() { return binOp_expTemplate("and_exp"); }
+ptrVec<ASTNode> and_exp() { return binOp_expTemplate("and_exp", "equality_exp"); }
 
-ptrVec<ASTNode> and_exp_prime() { return binOp_primeTemplate("and_exp'"); }
+ptrVec<ASTNode> and_exp_prime() { return binOp_primeTemplate("and_exp'", "equality_exp"); }
 
-ptrVec<ASTNode> equality_exp() { return binOp_expTemplate("equality_exp"); }
+ptrVec<ASTNode> equality_exp() { return binOp_expTemplate("equality_exp", "relational_exp"); }
 
-ptrVec<ASTNode> equality_exp_prime() { return binOp_primeTemplate("equality_exp'"); }
+ptrVec<ASTNode> equality_exp_prime() { return binOp_primeTemplate("equality_exp'", "relational_exp"); }
 
-ptrVec<ASTNode> relational_exp() { return binOp_expTemplate("relational_exp"); }
+ptrVec<ASTNode> relational_exp() { return binOp_expTemplate("relational_exp", "additive_exp"); }
 
-ptrVec<ASTNode> relational_exp_prime() { return binOp_primeTemplate("relational_exp'"); }
+ptrVec<ASTNode> relational_exp_prime() { return binOp_primeTemplate("relational_exp'", "additive_exp"); }
 
-ptrVec<ASTNode> additive_exp() { return binOp_expTemplate("additive_exp"); }
+ptrVec<ASTNode> additive_exp() { return binOp_expTemplate("additive_exp", "multiplicative_exp"); }
 
-ptrVec<ASTNode> additive_exp_prime() { return binOp_primeTemplate("additive_exp'"); }
+ptrVec<ASTNode> additive_exp_prime() { return binOp_primeTemplate("additive_exp'", "multiplicative_exp"); }
 
-ptrVec<ASTNode> multiplicative_exp() { return binOp_expTemplate("multiplicative_exp"); }
+ptrVec<ASTNode> multiplicative_exp() { return binOp_expTemplate("multiplicative_exp", "factor"); }
 
-ptrVec<ASTNode> multiplicative_exp_prime() { return binOp_primeTemplate("multiplicative_exp'"); }
+ptrVec<ASTNode> multiplicative_exp_prime() { return binOp_primeTemplate("multiplicative_exp'", "factor"); }
 
 ptrVec<ASTNode> factor() {
   nonTerminalInfo info = nonterminal("factor");
@@ -1294,8 +1326,11 @@ ptrVec<ASTNode> factor() {
   if (info.contains("primary")) {
     res.push_back(std::make_unique<FactorAST>(std::move(info["primary"])));
   } else {
+    ptrVec<ASTNode> factor = std::move(info["factor"]);
+    info.erase("factor");
+
     std::string symbol = info.begin()->first;
-    res.push_back(std::make_unique<NegationAST>(symbol, std::move(info["factor"])));
+    res.push_back(std::make_unique<NegationAST>(symbol, std::move(factor)));
   }
 
   return res;
@@ -1413,6 +1448,7 @@ static void initialiseFunctionMap() {
   functionMap["if_stmt"] = if_stmt;
   functionMap["else_stmt"] = else_stmt;
   functionMap["return_stmt"] = return_stmt;
+  functionMap["return_stmt'"] = return_stmt_prime;
   functionMap["expr"] = expr;
   functionMap["rval_or"] = rval_or;
   functionMap["rval_or'"] = rval_or_prime;

@@ -66,8 +66,10 @@ if_stmt ::= "if" "(" expr ")" block else_stmt
 else_stmt ::= "else" block
 else_stmt ::= ''
 
-return_stmt ::= "return" ";"
-return_stmt ::= "return" expr ";"
+return_stmt ::= "return" return_stmt'
+
+return_stmt' ::= ";"
+return_stmt' ::= expr ";"
 
 expr ::= IDENT "=" expr
 expr ::= rval_or
