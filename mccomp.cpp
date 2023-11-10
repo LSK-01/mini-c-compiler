@@ -459,6 +459,32 @@ template <typename Base, typename Derived> void castToDerived(std::unique_ptr<Ba
   target.reset(derivedPtr);
 }
 
+//-- codegen shit --//
+using SymbolTable = std::unordered_map<std::string, AllocaInst*>;
+using GlobalTable = std::unordered_map<std::string, GlobalVariable*>;
+using Tables = std::vector<SymbolTable>;
+Tables tables;
+GlobalTable globalTable;
+
+static AllocaInst* CreateEntryBlockAlloca(Function* TheFunction, const std::string& VarName, Type* type) {
+  IRBuilder<> TmpB(&TheFunction->getEntryBlock(), TheFunction->getEntryBlock().begin());
+  return TmpB.CreateAlloca(type, 0, VarName.c_str());
+}
+
+/* static AllocaInst* CreateEntryBlockAlloca(Function *TheFunction,
+ const std::string &VarName) {
+ IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
+ TheFunction->getEntryBlock().begin());
+ return TmpB.CreateAlloca(Type::getInt32Ty(TheContext), 0,
+ VarName.c_str());
+} */
+
+static LLVMContext TheContext;
+static IRBuilder<> Builder(TheContext);
+static std::unique_ptr<Module> TheModule;
+
+//-- codegen shit --//
+
 /// ASTNode - Base class for all AST nodes.
 class ASTNode {
 public:
@@ -475,7 +501,13 @@ public:
   std::unique_ptr<ExprAST> child;
   std::string symbol;
   NegationAST(std::string symbol, ptrVec<ASTNode>&& child) : symbol(symbol) { castToDerived<ASTNode, ExprAST>(child, this->child); };
-  virtual Value* codegen() override{};
+
+  virtual Value* codegen() override {
+    Value* childVal = child->codegen();
+
+    // if integer/float, and we have a !, cast to bool (i think check with jaden)
+  };
+
   virtual std::string to_string(int d) const override {
     std::string str = "";
 
@@ -514,7 +546,7 @@ public:
     castToDerived<ASTNode, StorageAST>(value, valueStorage);
     this->Val = std::stoi(valueStorage->value);
   };
-  virtual Value* codegen() override{};
+  virtual Value* codegen() override { return ConstantInt::get(TheContext, APInt(32, Val, true)); };
   virtual std::string to_string(int d) const override {
     std::string str = "";
     addIndents(d, str);
@@ -533,7 +565,9 @@ public:
     castToDerived<ASTNode, StorageAST>(value, valueStorage);
     this->Val = std::stof(valueStorage->value);
   };
-  virtual Value* codegen() override{};
+
+  virtual Value* codegen() override { return ConstantFP::get(TheContext, APFloat(Val)); };
+
   virtual std::string to_string(int d) const override {
     std::string str = "";
     addIndents(d, str);
@@ -556,7 +590,7 @@ public:
       Val = true;
     }
   };
-  virtual Value* codegen() override{};
+  virtual Value* codegen() override { return ConstantInt::get(TheContext, APInt(1, Val, false)); };
   virtual std::string to_string(int d) const override {
     std::string str = "";
     addIndents(d, str);
@@ -578,7 +612,10 @@ public:
     this->name = nameStorage->value;
   };
 
-  virtual Value* codegen() override{};
+  virtual Value* codegen() override{
+
+  };
+
   virtual std::string to_string(int d) const override {
     std::string str = "";
     addIndents(d, str);
@@ -601,7 +638,17 @@ public:
     castToDerived<ASTNode, StorageAST>(name, nameStorage);
     this->name = nameStorage->value;
   };
-  virtual Value* codegen() override{};
+
+  virtual Value* codegen() override {
+    // get first table with this variable innit
+    for (int i = tables.size() - 1; i >= 0; i--) {
+      if (tables[i].find(name) != tables[i].end()) {
+        return Builder.CreateLoad(tables[i][name]->getAllocatedType(), tables[i][name], name);
+      }
+      // ERROR HANDLE - VARIABLE NOT DECLARED, OR NO VALUE STORED
+    }
+  };
+
   virtual std::string to_string(int d) const override {
     std::string str = "";
     addIndents(d, str);
@@ -639,6 +686,76 @@ public:
   };
 };
 
+// widens left to right
+// returns the widest type id out of both values
+int widenLtoR(Value* leftVal, Value* rightVal) {
+
+  int leftTypeId = leftVal->getType()->getTypeID();
+  int rightTypeId = rightVal->getType()->getTypeID();
+  // widen as much as needed first
+  // bool = int = 13 < int = 13 < float = 2
+
+  if (leftTypeId == Type::FloatTyID) {
+    // no widening to be done
+    return Type::FloatTyID;
+  }
+
+  if (rightTypeId == Type::FloatTyID) {
+    leftVal = Builder.CreateSIToFP(leftVal, Type::getFloatTy(TheContext));
+    return Type::FloatTyID;
+  } else {
+    // check the bit width of the integers we are dealing with
+    // if they are not the same, then we need to widen the smaller one
+
+    IntegerType* intLeft = cast<IntegerType>(leftVal->getType());
+    unsigned widthLeft = intLeft->getIntegerBitWidth();
+
+    IntegerType* intRight = cast<IntegerType>(rightVal->getType());
+    unsigned widthRight = intRight->getIntegerBitWidth();
+
+    Type* int32type = Type::getInt32Ty(TheContext);
+
+    if (widthRight > widthLeft) {
+      leftVal = Builder.CreateSExt(leftVal, int32type);
+    }
+  }
+
+  return Type::IntegerTyID;
+}
+
+// return widest type
+int narrowLtoR(Value* leftVal, Value* rightVal) {
+
+  int leftTypeId = leftVal->getType()->getTypeID();
+  int rightTypeId = rightVal->getType()->getTypeID();
+  // widen as much as needed first
+  // bool = int = 13 < int = 13 < float = 2
+
+  if (rightTypeId == Type::FloatTyID) {
+    return Type::FloatTyID;
+  } else {
+    if (leftTypeId == Type::FloatTyID) {
+      leftVal = Builder.CreateFPToSI(leftVal, Type::getFloatTy(TheContext));
+    }
+    // check the bit width of the integers we are dealing with
+    // if they are not the same, then we need to widen the smaller one
+
+    IntegerType* intLeft = cast<IntegerType>(leftVal->getType());
+    unsigned widthLeft = intLeft->getIntegerBitWidth();
+
+    IntegerType* intRight = cast<IntegerType>(rightVal->getType());
+    unsigned widthRight = intRight->getIntegerBitWidth();
+
+    Type* int1type = Type::getInt1Ty(TheContext);
+
+    if (widthLeft > widthRight) {
+      leftVal = Builder.CreateTrunc(leftVal, int1type);
+    }
+  }
+
+  return Type::IntegerTyID;
+}
+
 class BinOpAST : public ExprAST {
 public:
   std::string op;
@@ -652,7 +769,39 @@ public:
   };
 
   BinOpAST(std::string op, ptrVec<ASTNode>&& right) : op(op) { this->right = std::move(right[0]); };
-  virtual Value* codegen() override{};
+
+  virtual Value* codegen() override {
+
+    Value* leftVal = this->left->codegen();
+    Value* rightVal = this->right->codegen();
+
+    int widestTypeId = widenLtoR(leftVal, rightVal);
+    widenLtoR(rightVal, leftVal);
+
+    // now both leftVal and rightVal should be the same type
+    // both floats if minTypeId == Type::FloatTyID, both 32 bit ints otherwise
+
+    if (op == "*") {
+      return Builder.CreateMul(this->left->codegen(), this->right->codegen());
+    } else if (op == "/") {
+      if (widestTypeId == Type::FloatTyID) {
+        return Builder.CreateFDiv(this->left->codegen(), this->right->codegen());
+      }
+
+      return Builder.CreateSDiv(this->left->codegen(), this->right->codegen());
+
+    } else if (op == "%") {
+      if (widestTypeId == Type::FloatTyID) {
+        return Builder.CreateFRem(this->left->codegen(), this->right->codegen());
+      }
+      return Builder.CreateSRem(this->left->codegen(), this->right->codegen());
+    } else if (op == "+") {
+      return Builder.CreateAdd(this->left->codegen(), this->right->codegen());
+    } else if (op == "-") {
+      return Builder.CreateSub(this->left->codegen(), this->right->codegen());
+    }
+  };
+
   virtual std::string to_string(int d) const override {
     std::string str = "";
     addIndents(d, str);
@@ -668,7 +817,34 @@ public:
 class VarDeclAST : public DeclAST {
 public:
   VarDeclAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name) : DeclAST(std::move(type), std::move(name)){};
-  virtual Value* codegen() override{};
+
+  virtual Value* codegen() override {
+    // create alloca, add to symbol table, return value
+    Type* typePtr;
+    if (type == "bool") {
+      typePtr = Type::getInt1Ty(TheContext);
+    } else if (type == "int") {
+      typePtr = Type::getInt32Ty(TheContext);
+    } else {
+      // should be float
+      typePtr = Type::getFloatTy(TheContext);
+    }
+
+    AllocaInst* alloca = CreateEntryBlockAlloca(Builder.GetInsertBlock()->getParent(), name, typePtr);
+
+    // get the last symbol table, push to that one (this is the nested block we are in)
+    // if tables.size() is 0, then we are declaring a global variable
+
+    // ERROR HANDLE - DONT ALLOW REDECLARATION OF SAME VARIABLE IN SAME SCOPE
+    if (tables.size() == 0) {
+      GlobalVariable* gvar = new GlobalVariable(*(TheModule.get()), typePtr, false, GlobalValue::CommonLinkage, nullptr);
+      gvar->setAlignment(MaybeAlign(4));
+      globalTable[name] = gvar;
+    } else {
+      tables[tables.size() - 1][name] = alloca;
+    }
+  };
+
   virtual std::string to_string(int d) const override {
     std::string str = "";
     addIndents(d, str);
@@ -703,7 +879,21 @@ public:
     castToDerived<ASTNode, StorageAST>(name, nameStorage);
     this->name = nameStorage->value;
   };
-  virtual Value* codegen() override{};
+
+  virtual Value* codegen() override {
+    Value* expressionVal = expression->codegen();
+
+    // get first table with this variable innit
+    for (int i = tables.size() - 1; i >= 0; i--) {
+      if (tables[i].find(name) != tables[i].end()) {
+        // need to widen/narrow as required
+        widen
+        Type* type = tables[i][name]->getAllocatedType();
+        return Builder.CreateStore(expressionVal, tables[i][name]);
+      }
+    }
+  };
+
   virtual std::string to_string(int d) const override {
     std::string str = "";
     addIndents(d, str);
@@ -827,7 +1017,7 @@ public:
     if (expression) {
       str += expression->to_string(d + 1);
     }
-addIndents(d, str);
+    addIndents(d, str);
     str += "</Return>\n";
     return str;
   };
@@ -1568,10 +1758,6 @@ static std::unique_ptr<ASTNode> parser() { return std::move(program()[0]); }
 // Code Generation
 //===----------------------------------------------------------------------===//
 
-static LLVMContext TheContext;
-static IRBuilder<> Builder(TheContext);
-static std::unique_ptr<Module> TheModule;
-
 //===----------------------------------------------------------------------===//
 // AST Printer
 //===----------------------------------------------------------------------===//
@@ -1669,26 +1855,24 @@ int main(int argc, char** argv) {
 
   fprintf(stderr, "Parsing Finished\n");
 
-/*   std::string filepath = "stringrep.xml";
+  /*   std::string filepath = "stringrep.xml";
 
-  // Create an ofstream instance to write to the file
-  std::ofstream fileStream(filepath);
+    // Create an ofstream instance to write to the file
+    std::ofstream fileStream(filepath);
 
-  // Check if the file stream is open
-  if (fileStream.is_open()) {
-    // Write the JSON string to the file
-    fileStream << xmlString;
-    // Close the file stream
-    fileStream.close();
-    std::cout << "XML written to " << filepath << std::endl;
-  } else {
-    std::cerr << "Unable to open file for writing." << std::endl;
-    return 1;
-  } */
+    // Check if the file stream is open
+    if (fileStream.is_open()) {
+      // Write the JSON string to the file
+      fileStream << xmlString;
+      // Close the file stream
+      fileStream.close();
+      std::cout << "XML written to " << filepath << std::endl;
+    } else {
+      std::cerr << "Unable to open file for writing." << std::endl;
+      return 1;
+    } */
 
   llvm::outs() << *parser() << "\n";
-
-
 
   return 0;
   //********************* Start printing final IR **************************
