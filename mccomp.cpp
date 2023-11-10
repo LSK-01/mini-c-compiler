@@ -374,6 +374,12 @@ static TOKEN gettok() {
 /// token the parser is looking at.  getNextToken reads another token from the
 /// lexer and updates CurTok with its results.
 
+void addIndents(int n, std::string& str) {
+  for (int i = 0; i < n; i++) {
+    str += "\t";
+  }
+}
+
 static TOKEN CurTok;
 static std::deque<TOKEN> tok_buffer;
 
@@ -459,7 +465,7 @@ public:
   // destructor
   virtual ~ASTNode() = default;
   virtual Value* codegen() = 0;
-  virtual std::string to_string() const { return ""; };
+  virtual std::string to_string(int d) const { return ""; };
 };
 
 class ExprAST : public ASTNode {};
@@ -470,10 +476,14 @@ public:
   std::string symbol;
   NegationAST(std::string symbol, ptrVec<ASTNode>&& child) : symbol(symbol) { castToDerived<ASTNode, ExprAST>(child, this->child); };
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override {
-    std::string str = "<Negation symbol='" + symbol + "'>";
-    str += child->to_string();
-    str += "</Negation>";
+  virtual std::string to_string(int d) const override {
+    std::string str = "";
+
+    addIndents(d, str);
+    str += "<Negation symbol='" + symbol + "'>\n";
+    str += child->to_string(d + 1);
+    addIndents(d, str);
+    str += "</Negation>\n";
     return str;
   };
 };
@@ -481,7 +491,7 @@ public:
 class PrimaryAST : public ExprAST {
 public:
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override{};
+  virtual std::string to_string(int d) const override{};
 };
 
 class StorageAST : public ASTNode {
@@ -490,7 +500,7 @@ public:
   std::string value;
   StorageAST(std::string value) : value(value){};
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override{};
+  virtual std::string to_string(int d) const override{};
 };
 
 /// IntASTNode - Class for integer literals like 1, 2, 10,
@@ -505,8 +515,10 @@ public:
     this->Val = std::stoi(valueStorage->value);
   };
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override {
-    std::string str = "<Int val='" + std::to_string(Val) + "'/>";
+  virtual std::string to_string(int d) const override {
+    std::string str = "";
+    addIndents(d, str);
+    str += "<Int val='" + std::to_string(Val) + "'/>\n";
     return str;
   };
 };
@@ -522,8 +534,10 @@ public:
     this->Val = std::stof(valueStorage->value);
   };
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override {
-    std::string str = "<Float val='" + std::to_string(Val) + "'/>";
+  virtual std::string to_string(int d) const override {
+    std::string str = "";
+    addIndents(d, str);
+    str += "<Float val='" + std::to_string(Val) + "'/>\n";
     return str;
   };
 };
@@ -543,8 +557,10 @@ public:
     }
   };
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override {
-    std::string str = "<Bool val='" + std::to_string(Val) + "'/>";
+  virtual std::string to_string(int d) const override {
+    std::string str = "";
+    addIndents(d, str);
+    str += "<Bool val='" + std::to_string(Val) + "'/>\n";
     return str;
   };
 };
@@ -563,12 +579,15 @@ public:
   };
 
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override {
-    std::string str = "<FuncCall name='" + name + "'>";
+  virtual std::string to_string(int d) const override {
+    std::string str = "";
+    addIndents(d, str);
+    str += "<FuncCall name='" + name + "'>\n";
     for (auto& arg : args) {
-      str += arg->to_string();
+      str += arg->to_string(d + 1);
     }
-    str += "</FuncCall>";
+    addIndents(d, str);
+    str += "</FuncCall>\n";
     return str;
   };
 };
@@ -583,8 +602,10 @@ public:
     this->name = nameStorage->value;
   };
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override {
-    std::string str = "<VarCall name='" + name + "' />";
+  virtual std::string to_string(int d) const override {
+    std::string str = "";
+    addIndents(d, str);
+    str += "<VarCall name='" + name + "' />\n";
     return str;
   };
 };
@@ -609,9 +630,11 @@ public:
   DeclAST(){};
 
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override {
-    std::string str = "<Decl type='" + type + "' name='" + name + "'>";
-    str += "</Decl>";
+  virtual std::string to_string(int d) const override {
+    std::string str = "";
+    addIndents(d, str);
+    str += "<Decl type='" + type + "' name='" + name + "'>";
+    str += "</Decl>\n";
     return str;
   };
 };
@@ -630,11 +653,14 @@ public:
 
   BinOpAST(std::string op, ptrVec<ASTNode>&& right) : op(op) { this->right = std::move(right[0]); };
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override {
-    std::string str = "<BinOp op='" + op + "'>";
-    str += left->to_string();
-    str += right->to_string();
-    str += "</BinOp>";
+  virtual std::string to_string(int d) const override {
+    std::string str = "";
+    addIndents(d, str);
+    str += "<BinOp op='" + op + "'>\n";
+    str += left->to_string(d + 1);
+    str += right->to_string(d + 1);
+    addIndents(d, str);
+    str += "</BinOp>\n";
     return str;
   };
 };
@@ -643,9 +669,11 @@ class VarDeclAST : public DeclAST {
 public:
   VarDeclAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name) : DeclAST(std::move(type), std::move(name)){};
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override {
-    std::string str = "<VarDecl type='" + type + "' name='" + name + "'>";
-    str += "</VarDecl>";
+  virtual std::string to_string(int d) const override {
+    std::string str = "";
+    addIndents(d, str);
+    str += "<VarDecl type='" + type + "' name='" + name + "'>";
+    str += "</VarDecl>\n";
     return str;
   };
 };
@@ -654,9 +682,11 @@ class ParamAST : public VarDeclAST {
 public:
   ParamAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name) : VarDeclAST(std::move(type), std::move(name)){};
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override {
-    std::string str = "<Param type='" + type + "' name='" + name + "'>";
-    str += "</Param>";
+  virtual std::string to_string(int d) const override {
+    std::string str = "";
+    addIndents(d, str);
+    str += "<Param type='" + type + "' name='" + name + "'>";
+    str += "</Param>\n";
     return str;
   };
 };
@@ -674,10 +704,13 @@ public:
     this->name = nameStorage->value;
   };
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override {
-    std::string str = "<VarAssign name='" + name + "'>";
-    str += expression->to_string();
-    str += "</VarAssign>";
+  virtual std::string to_string(int d) const override {
+    std::string str = "";
+    addIndents(d, str);
+    str += "<VarAssign name='" + name + "'>\n";
+    str += expression->to_string(d + 1);
+    addIndents(d, str);
+    str += "</VarAssign>\n";
     return str;
   };
 };
@@ -692,10 +725,13 @@ public:
   ExprStmtAST(){};
 
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override {
-    std::string str = "<ExprStmt>";
-    str += expression->to_string();
-    str += "</ExprStmt>";
+  virtual std::string to_string(int d) const override {
+    std::string str = "";
+    addIndents(d, str);
+    str += "<ExprStmt>\n";
+    str += expression->to_string(d + 1);
+    addIndents(d, str);
+    str += "</ExprStmt>\n";
     return str;
   };
 };
@@ -710,15 +746,18 @@ public:
     castToDerived<ASTNode, StmtAST>(stmts, this->stmts);
   }
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override {
-    std::string str = "<Block>";
+  virtual std::string to_string(int d) const override {
+    std::string str = "";
+    addIndents(d, str);
+    str += "<Block>\n";
     for (auto& local : localDecls) {
-      str += local->to_string();
+      str += local->to_string(d + 1);
     }
     for (auto& s : stmts) {
-      str += s->to_string();
+      str += s->to_string(d + 1);
     }
-    str += "</Block>";
+    addIndents(d, str);
+    str += "</Block>\n";
     return str;
   };
 };
@@ -736,12 +775,15 @@ public:
   };
 
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override {
-    std::string str = "<If>";
-    str += expression->to_string();
-    str += body->to_string();
-    str += elseBody->to_string();
-    str += "</If>";
+  virtual std::string to_string(int d) const override {
+    std::string str = "";
+    addIndents(d, str);
+    str += "<If>\n";
+    str += expression->to_string(d + 1);
+    str += body->to_string(d + 1);
+    str += elseBody->to_string(d + 1);
+    addIndents(d, str);
+    str += "</If>\n";
     return str;
   };
 };
@@ -757,10 +799,13 @@ public:
   };
 
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override {
-    std::string str = "<While>";
-    str += expression->to_string();
-    str += stmt->to_string();
+  virtual std::string to_string(int d) const override {
+    std::string str = "";
+    addIndents(d, str);
+    str += "<While>";
+    str += expression->to_string(d + 1);
+    str += stmt->to_string(d + 1);
+    addIndents(d, str);
     str += "</While>";
     return str;
   };
@@ -774,11 +819,16 @@ public:
   ReturnAST(){};
 
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override {
-    std::string str = "<Return>";
-    str += expression->to_string();
+  virtual std::string to_string(int d) const override {
+    std::string str = "";
+    addIndents(d, str);
+    str += "<Return>\n";
 
-    str += "</Return>";
+    if (expression) {
+      str += expression->to_string(d + 1);
+    }
+addIndents(d, str);
+    str += "</Return>\n";
     return str;
   };
 };
@@ -802,13 +852,15 @@ public:
   };
 
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override {
-    std::string str = "<Extern type='" + type + "' name='" + name + "'>";
+  virtual std::string to_string(int d) const override {
+    std::string str = "";
+    addIndents(d, str);
+    str += "<Extern type='" + type + "' name='" + name + "'>\n";
     for (auto& param : params) {
-      str += param->to_string();
+      str += param->to_string(d + 1);
     }
-
-    str += "</Extern>";
+    addIndents(d, str);
+    str += "</Extern>\n";
     return str;
   };
 };
@@ -826,15 +878,18 @@ public:
   FuncDeclAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name) : DeclAST(std::move(type), std::move(name)){};
 
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override {
-    std::string str = "<FuncDecl type='" + type + "' name='" + name + "'>";
+  virtual std::string to_string(int d) const override {
+    std::string str = "";
+    addIndents(d, str);
+    str += "<FuncDecl type='" + type + "' name='" + name + "'>\n";
 
     for (auto& param : params) {
-      str += param->to_string();
+      str += param->to_string(d + 1);
     }
 
-    str += block->to_string();
-    str += "</FuncDecl>";
+    str += block->to_string(d + 1);
+    addIndents(d, str);
+    str += "</FuncDecl>\n";
 
     return str;
   };
@@ -845,7 +900,13 @@ public:
   std::unique_ptr<PrimaryAST> expression;
   FactorAST(ptrVec<ASTNode> expression) { castToDerived<ASTNode, PrimaryAST>(expression, this->expression); };
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override { return expression->to_string(); };
+  virtual std::string to_string(int d) const override {
+    std::string str = "";
+    addIndents(d, str);
+    str += expression->to_string(d + 1);
+
+    return str;
+  };
 };
 
 class PartialFuncDeclAST : public ASTNode {
@@ -858,7 +919,7 @@ public:
   PartialFuncDeclAST(){};
 
   virtual Value* codegen() override{};
-  virtual std::string to_string() const override{};
+  virtual std::string to_string(int d) const override{};
 };
 
 class ProgramAST : public ASTNode {
@@ -871,13 +932,13 @@ public:
     castToDerived<ASTNode, DeclAST>(declList, this->declList);
   }
 
-  virtual std::string to_string() const override {
-    std::string str = "<Program>";
+  virtual std::string to_string(int d) const override {
+    std::string str = "<Program>\n";
     for (auto& externNode : externList) {
-      str += externNode->to_string();
+      str += externNode->to_string(d + 1);
     }
     for (auto& declNode : declList) {
-      str += declNode->to_string();
+      str += declNode->to_string(d + 1);
     }
     str += "</Program>";
 
@@ -1501,7 +1562,7 @@ ptrVec<ASTNode> arg_list_prime() {
   return argList;
 }
 
-static std::string parser() { return program()[0]->to_string(); }
+static std::unique_ptr<ASTNode> parser() { return std::move(program()[0]); }
 
 //===----------------------------------------------------------------------===//
 // Code Generation
@@ -1516,7 +1577,7 @@ static std::unique_ptr<Module> TheModule;
 //===----------------------------------------------------------------------===//
 
 inline llvm::raw_ostream& operator<<(llvm::raw_ostream& os, const ASTNode& ast) {
-  os << ast.to_string();
+  os << ast.to_string(0);
   return os;
 }
 
@@ -1586,17 +1647,8 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  // initialize line number and column numbers to zero
   lineNo = 1;
   columnNo = 1;
-  /*  // get the first token
-   getNextToken();
-   while (CurTok.type != EOF_TOK)
-   {
-     fprintf(stderr, "Token: %s with type %d\n", CurTok.lexeme.c_str(),
-             CurTok.type);
-     getNextToken();
-   } */
 
   readGrammar("grammar.txt");
 
@@ -1614,10 +1666,10 @@ int main(int argc, char** argv) {
   TheModule = std::make_unique<Module>("mini-c", TheContext);
 
   // Run the parser now.
-  std::string xmlString = parser();
+
   fprintf(stderr, "Parsing Finished\n");
 
-  std::string filepath = "stringrep.xml";
+/*   std::string filepath = "stringrep.xml";
 
   // Create an ofstream instance to write to the file
   std::ofstream fileStream(filepath);
@@ -1632,7 +1684,11 @@ int main(int argc, char** argv) {
   } else {
     std::cerr << "Unable to open file for writing." << std::endl;
     return 1;
-  }
+  } */
+
+  llvm::outs() << *parser() << "\n";
+
+
 
   return 0;
   //********************* Start printing final IR **************************
