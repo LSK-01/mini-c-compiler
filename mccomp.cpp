@@ -466,6 +466,17 @@ using Tables = std::vector<SymbolTable>;
 Tables tables;
 GlobalTable globalTable;
 
+Type* stringToPtrType(std::string type) {
+  if (type == "bool") {
+    return Type::getInt1Ty(TheContext);
+  } else if (type == "int") {
+    return Type::getInt32Ty(TheContext);
+  } else {
+    // should be float
+    return Type::getFloatTy(TheContext);
+  }
+}
+
 static AllocaInst* CreateEntryBlockAlloca(Function* TheFunction, const std::string& VarName, Type* type) {
   IRBuilder<> TmpB(&TheFunction->getEntryBlock(), TheFunction->getEntryBlock().begin());
   return TmpB.CreateAlloca(type, 0, VarName.c_str());
@@ -888,16 +899,7 @@ public:
 
   virtual Value* codegen() override {
     // create alloca, add to symbol table, return value
-    Type* typePtr;
-    if (type == "bool") {
-      typePtr = Type::getInt1Ty(TheContext);
-    } else if (type == "int") {
-      typePtr = Type::getInt32Ty(TheContext);
-    } else {
-      // should be float
-      typePtr = Type::getFloatTy(TheContext);
-    }
-
+    Type* typePtr = stringToPtrType(type);
     AllocaInst* alloca = CreateEntryBlockAlloca(Builder.GetInsertBlock()->getParent(), name, typePtr);
 
     // get the last symbol table, push to that one (this is the nested block we are in)
@@ -974,8 +976,7 @@ public:
   };
 };
 
-class StmtAST : public ASTNode {
-};
+class StmtAST : public ASTNode {};
 
 class ExprStmtAST : public StmtAST {
 public:
@@ -984,10 +985,8 @@ public:
   ExprStmtAST(ptrVec<ASTNode>&& expression) { castToDerived<ASTNode, ExprAST>(expression, this->expression); };
   ExprStmtAST(){};
 
-  virtual Value* codegen() override{
-    return expression->codegen();
-  };
-  
+  virtual Value* codegen() override { return expression->codegen(); };
+
   virtual std::string to_string(int d) const override {
     std::string str = "";
     addIndents(d, str);
@@ -1009,12 +1008,20 @@ public:
     castToDerived<ASTNode, StmtAST>(stmts, this->stmts);
   }
 
-  virtual Value* codegen() override{
-    for(auto& local : localDecls){
+  virtual Value* codegen() override {
+    Value* returnVal = nullptr;
+
+    for (auto& local : localDecls) {
       local->codegen();
     }
-    for(auto& stmt: stmts){
-      stmt->codegen();
+    for (auto& stmt : stmts) {
+      if(dynamic_cast<ReturnAST*>(stmt.get())){
+        //found return stmt
+        returnVal = stmt->codegen();
+      }
+      else{
+        stmt->codegen();
+      }
     }
   };
 
@@ -1052,7 +1059,7 @@ public:
     BasicBlock* elseBlock = BasicBlock::Create(TheContext, "else");
     BasicBlock* end = BasicBlock::Create(TheContext, "end");
 
-    Value* cond = expression->codegen();    
+    Value* cond = expression->codegen();
     Value* comp = Builder.CreateICmpNE(cond, Builder.getInt1(false));
 
     Builder.CreateCondBr(comp, ifBlock, elseBlock);
@@ -1060,7 +1067,7 @@ public:
     Builder.SetInsertPoint(ifBlock);
     body->codegen();
 
-    //TODO
+    // TODO
     elseBlock->insertInto(TheFunction);
 
     Builder.CreateBr(end);
@@ -1068,7 +1075,7 @@ public:
     Builder.SetInsertPoint(elseBlock);
     elseBody->codegen();
 
-    //TODO
+    // TODO
     end->insertInto(TheFunction);
 
     Builder.CreateBr(end);
@@ -1101,7 +1108,7 @@ public:
     castToDerived<ASTNode, StmtAST>(stmt, this->stmt);
   };
 
-  virtual Value* codegen() override{
+  virtual Value* codegen() override {
     Function* TheFunction = Builder.GetInsertBlock()->getParent();
     BasicBlock* condBlock = BasicBlock::Create(TheContext, "condition", TheFunction);
     BasicBlock* whileBlock = BasicBlock::Create(TheContext, "while");
@@ -1118,13 +1125,13 @@ public:
 
     Builder.CreateCondBr(comp, whileBlock, end);
 
-    //TODO
+    // TODO
     whileBlock->insertInto(TheFunction);
     Builder.SetInsertPoint(whileBlock);
     stmt->codegen();
     Builder.CreateBr(condBlock);
 
-    //TODO
+    // TODO
     end->insertInto(TheFunction);
 
     Builder.SetInsertPoint(end);
@@ -1149,7 +1156,8 @@ public:
   ReturnAST(ptrVec<ASTNode>&& expression) { castToDerived<ASTNode, ExprAST>(expression, this->expression); };
   ReturnAST(){};
 
-  virtual Value* codegen() override{};
+  virtual Value* codegen() override { return expression->codegen(); };
+
   virtual std::string to_string(int d) const override {
     std::string str = "";
     addIndents(d, str);
@@ -1165,11 +1173,12 @@ public:
 };
 
 class ExternAST : public ASTNode {
+
+public:
   std::string type;
   std::string name;
   std::vector<std::unique_ptr<ParamAST>> params;
 
-public:
   ExternAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name, std::vector<std::unique_ptr<ASTNode>>&& params) {
     castToDerived<ASTNode, ParamAST>(params, this->params);
 
@@ -1182,7 +1191,23 @@ public:
     this->type = typeNode->value;
   };
 
-  virtual Value* codegen() override{};
+  virtual Value* codegen() override {
+    // Make the function type:
+    std::vector<Type*> types;
+    for (auto& param : params) {
+      types.push_back(stringToPtrType(param->type));
+    }
+
+    FunctionType* FT = FunctionType::get(stringToPtrType(type), types, false);
+    Function* F = Function::Create(FT, Function::ExternalLinkage, name, TheModule.get());
+    // Set names for all arguments.
+    unsigned Idx = 0;
+    for (auto& Arg : F->args())
+      Arg.setName(params[Idx++]->name);
+
+    return F;
+  };
+
   virtual std::string to_string(int d) const override {
     std::string str = "";
     addIndents(d, str);
@@ -1198,25 +1223,54 @@ public:
 
 class FuncDeclAST : public DeclAST {
 public:
-  std::vector<std::unique_ptr<ParamAST>> params;
+  std::unique_ptr<ExternAST> prototype;
   std::unique_ptr<BlockAST> block;
 
-  FuncDeclAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name, ptrVec<ASTNode>&& params, ptrVec<ASTNode>&& block) : DeclAST(std::move(type), std::move(name)) {
-    castToDerived<ASTNode, ParamAST>(params, this->params);
+  FuncDeclAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name, ptrVec<ASTNode>&& params, ptrVec<ASTNode>&& block) {
+    prototype = std::make_unique<ExternAST>(std::move(type), std::move(name), std::move(params));
     castToDerived<ASTNode, BlockAST>(block, this->block);
   };
 
   FuncDeclAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name) : DeclAST(std::move(type), std::move(name)){};
 
-  virtual Value* codegen() override{};
+  virtual Value* codegen() override {
+    Function* TheFunction = TheModule->getFunction(prototype->name);
+    if (!TheFunction)
+      TheFunction = (Function*)prototype->codegen();
+    if (!TheFunction)
+      return nullptr;
+
+    BasicBlock* BB = BasicBlock::Create(TheContext, "entry", TheFunction);
+    Builder.SetInsertPoint(BB);
+
+    // make a new symbol table, push to tables, record argument names
+    SymbolTable newTable;
+    for (auto& Arg : TheFunction->args()) {
+      AllocaInst* Alloca = CreateEntryBlockAlloca(TheFunction, Arg.getName().str(), Arg.getType());
+      Builder.CreateStore(&Arg, Alloca);
+      newTable[std::string(Arg.getName())] = Alloca;
+    }
+    if (Value* RetVal = block->codegen()) {
+      // Finish off the function.
+      if(!RetVal){
+        //void function
+        //ERROR HANDLE I GUESS
+        Builder.CreateRetVoid();
+      }
+      Builder.CreateRet(RetVal);
+    }
+    // Validate the generated code, checking
+    verifyFunction(*TheFunction);
+
+    return TheFunction;
+  };
+
   virtual std::string to_string(int d) const override {
     std::string str = "";
     addIndents(d, str);
     str += "<FuncDecl type='" + type + "' name='" + name + "'>\n";
 
-    for (auto& param : params) {
-      str += param->to_string(d + 1);
-    }
+    str += prototype->to_string(d + 1);
 
     str += block->to_string(d + 1);
     addIndents(d, str);
@@ -1469,7 +1523,6 @@ ptrVec<ASTNode> decl() {
   nonTerminalInfo info = nonterminal("decl");
 
   ptrVec<ASTNode> type;
-  std::unique_ptr<BlockAST> block;
   ptrVec<ASTNode>& identifier = info["IDENT"];
   ptrVec<ASTNode> res;
 
