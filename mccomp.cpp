@@ -460,6 +460,14 @@ template <typename Base, typename Derived> void castToDerived(std::unique_ptr<Ba
 }
 
 //-- codegen shit --//
+int numBlocks;
+int numReturns;
+bool isFunctionBlock = false;
+
+static LLVMContext TheContext;
+static IRBuilder<> Builder(TheContext);
+static std::unique_ptr<Module> TheModule;
+
 using SymbolTable = std::unordered_map<std::string, AllocaInst*>;
 using GlobalTable = std::unordered_map<std::string, GlobalVariable*>;
 using Tables = std::vector<SymbolTable>;
@@ -471,10 +479,44 @@ Type* stringToPtrType(std::string type) {
     return Type::getInt1Ty(TheContext);
   } else if (type == "int") {
     return Type::getInt32Ty(TheContext);
-  } else {
-    // should be float
+  } else if (type == "float") {
     return Type::getFloatTy(TheContext);
   }
+
+  return Type::getVoidTy(TheContext);
+}
+
+// Assign ranks to types: float > 32 bit int > 1 bit int
+int getTypeRank(Type* type) {
+  if (type->isFloatTy())
+    return 3;
+  if (type->isIntegerTy(32))
+    return 2;
+  if (type->isIntegerTy(1))
+    return 1;
+  if (type->isVoidTy())
+    return 0;
+  return -1; // Unknown or unsupported type
+};
+
+Constant* getDefaultConst(Type* type) {
+  int rank = getTypeRank(type);
+  if (rank == 3) {
+    return ConstantFP::get(TheContext, APFloat(0.0f));
+  }
+  if (rank == 2) {
+    return ConstantInt::get(TheContext, APInt(32, 0, true));
+  }
+  if (rank == 1) {
+    return ConstantInt::get(TheContext, APInt(1, 0, false));
+  }
+  return nullptr;
+}
+
+bool compareTypes(Type* type1, Type* type2) {
+
+  // Compare the ranks of the types
+  return getTypeRank(type1) >= getTypeRank(type2);
 }
 
 static AllocaInst* CreateEntryBlockAlloca(Function* TheFunction, const std::string& VarName, Type* type) {
@@ -484,10 +526,10 @@ static AllocaInst* CreateEntryBlockAlloca(Function* TheFunction, const std::stri
 
 // widens left to right
 // returns the widest type id out of both values
-int widenLtoR(Value* leftVal, Value* rightVal) {
+int widenLtoR(Value* leftVal, Type* rightType) {
 
   int leftTypeId = leftVal->getType()->getTypeID();
-  int rightTypeId = rightVal->getType()->getTypeID();
+  int rightTypeId = rightType->getTypeID();
   // widen as much as needed first
   // bool = int = 13 < int = 13 < float = 2
 
@@ -506,7 +548,7 @@ int widenLtoR(Value* leftVal, Value* rightVal) {
     IntegerType* intLeft = cast<IntegerType>(leftVal->getType());
     unsigned widthLeft = intLeft->getIntegerBitWidth();
 
-    IntegerType* intRight = cast<IntegerType>(rightVal->getType());
+    IntegerType* intRight = cast<IntegerType>(rightType);
     unsigned widthRight = intRight->getIntegerBitWidth();
 
     Type* int32type = Type::getInt32Ty(TheContext);
@@ -520,10 +562,10 @@ int widenLtoR(Value* leftVal, Value* rightVal) {
 }
 
 // return widest type
-int narrowLtoR(Value* leftVal, Value* rightVal) {
+int narrowLtoR(Value* leftVal, Type* rightType) {
 
   int leftTypeId = leftVal->getType()->getTypeID();
-  int rightTypeId = rightVal->getType()->getTypeID();
+  int rightTypeId = rightType->getTypeID();
   // widen as much as needed first
   // bool = int = 13 < int = 13 < float = 2
 
@@ -539,7 +581,7 @@ int narrowLtoR(Value* leftVal, Value* rightVal) {
     IntegerType* intLeft = cast<IntegerType>(leftVal->getType());
     unsigned widthLeft = intLeft->getIntegerBitWidth();
 
-    IntegerType* intRight = cast<IntegerType>(rightVal->getType());
+    IntegerType* intRight = cast<IntegerType>(rightType);
     unsigned widthRight = intRight->getIntegerBitWidth();
 
     Type* int1type = Type::getInt1Ty(TheContext);
@@ -552,9 +594,8 @@ int narrowLtoR(Value* leftVal, Value* rightVal) {
   return Type::IntegerTyID;
 }
 
-static LLVMContext TheContext;
-static IRBuilder<> Builder(TheContext);
-static std::unique_ptr<Module> TheModule;
+Value* trueValue = ConstantInt::get(Type::getInt1Ty(TheContext), 1, false);
+Value* zeroValue = ConstantInt::get(Type::getInt32Ty(TheContext), 0, true);
 
 //-- codegen shit --//
 
@@ -579,6 +620,21 @@ public:
     Value* childVal = child->codegen();
     // double check with finnbarrrrrr
     //  if integer/float, and we have a !, cast to bool (i think check with jaden)
+    if (symbol == "!") {
+      // first make sure we cast to bool if needed
+      narrowLtoR(childVal, Type::getInt1Ty(TheContext));
+      // flipit
+      return Builder.CreateXor(childVal, trueValue);
+    }
+    if (symbol == "-") {
+      int widestTypeId = widenLtoR(childVal, Type::getInt32Ty(TheContext));
+      if (widestTypeId == Type::FloatTyID) {
+        return Builder.CreateFNeg(childVal);
+      }
+      return Builder.CreateSub(zeroValue, childVal);
+    }
+
+    return nullptr;
   };
 
   virtual std::string to_string(int d) const override {
@@ -685,8 +741,23 @@ public:
     this->name = nameStorage->value;
   };
 
-  virtual Value* codegen() override{
-
+  virtual Value* codegen() override {
+    // Look up the name in the global module table.
+    Function* CalleeF = TheModule->getFunction(name);
+    if (!CalleeF) {
+    }
+    // ERROR
+    // If argument mismatch error.
+    if (CalleeF->arg_size() != args.size()) {
+    }
+    // ERROR
+    std::vector<Value*> ArgsV;
+    for (unsigned i = 0, e = args.size(); i != e; ++i) {
+      ArgsV.push_back(args[i]->codegen());
+      if (!ArgsV.back())
+        return nullptr;
+    }
+    return Builder.CreateCall(CalleeF, ArgsV, "calltmp");
   };
 
   virtual std::string to_string(int d) const override {
@@ -716,7 +787,7 @@ public:
     // get first table with this variable innit
     for (int i = tables.size() - 1; i >= 0; i--) {
       if (tables[i].find(name) != tables[i].end()) {
-        return Builder.CreateLoad(tables[i][name]->getAllocatedType(), tables[i][name], name);
+        return Builder.CreateLoad(tables[i][name]->getType(), tables[i][name], name);
       }
       // ERROR HANDLE - VARIABLE NOT DECLARED, OR NO VALUE STORED
     }
@@ -750,13 +821,7 @@ public:
   DeclAST(){};
 
   virtual Value* codegen() override{};
-  virtual std::string to_string(int d) const override {
-    std::string str = "";
-    addIndents(d, str);
-    str += "<Decl type='" + type + "' name='" + name + "'>";
-    str += "</Decl>\n";
-    return str;
-  };
+  virtual std::string to_string(int d) const override{};
 };
 
 class BinOpAST : public ExprAST {
@@ -778,8 +843,8 @@ public:
     Value* leftVal = this->left->codegen();
     Value* rightVal = this->right->codegen();
 
-    int widestTypeId = widenLtoR(leftVal, rightVal);
-    widenLtoR(rightVal, leftVal);
+    int widestTypeId = widenLtoR(leftVal, rightVal->getType());
+    widenLtoR(rightVal, leftVal->getType());
 
     // now both leftVal and rightVal should be the same type
     // both floats if minTypeId == Type::FloatTyID, both 32 bit ints otherwise
@@ -900,7 +965,6 @@ public:
   virtual Value* codegen() override {
     // create alloca, add to symbol table, return value
     Type* typePtr = stringToPtrType(type);
-    AllocaInst* alloca = CreateEntryBlockAlloca(Builder.GetInsertBlock()->getParent(), name, typePtr);
 
     // get the last symbol table, push to that one (this is the nested block we are in)
     // if tables.size() is 0, then we are declaring a global variable
@@ -909,8 +973,10 @@ public:
     if (tables.size() == 0) {
       GlobalVariable* gvar = new GlobalVariable(*(TheModule.get()), typePtr, false, GlobalValue::CommonLinkage, nullptr);
       gvar->setAlignment(MaybeAlign(4));
+      gvar->setInitializer(getDefaultConst(typePtr));
       globalTable[name] = gvar;
     } else {
+      AllocaInst* alloca = CreateEntryBlockAlloca(Builder.GetInsertBlock()->getParent(), name, typePtr);
       tables[tables.size() - 1][name] = alloca;
     }
   };
@@ -952,17 +1018,23 @@ public:
 
   virtual Value* codegen() override {
     Value* expressionVal = expression->codegen();
-
+    Value* valAssigned;
     // get first table with this variable innit
-    for (int i = tables.size() - 1; i >= 0; i--) {
-      if (tables[i].find(name) != tables[i].end()) {
-        // need to widen/narrow as required
-        widenLtoR(expressionVal, tables[i][name]);
-        narrowLtoR(expressionVal, tables[i][name]);
-        return Builder.CreateStore(expressionVal, tables[i][name]);
+    // ERROR HANDLE - VARIABLE MUST BE DECLARED FIRST
+    if (tables.size() == 0) {
+      valAssigned = Builder.CreateStore(expressionVal, globalTable[name]);
+    } else {
+      for (int i = tables.size() - 1; i >= 0; i--) {
+        if (tables[i].find(name) != tables[i].end()) {
+          // need to widen/narrow as required
+          widenLtoR(expressionVal, tables[i][name]->getType());
+          narrowLtoR(expressionVal, tables[i][name]->getType());
+          valAssigned = Builder.CreateStore(expressionVal, tables[i][name]);
+        }
       }
     }
-    // ERROR HANDLE - VARIABLE NOT DECLARED
+
+    return valAssigned;
   };
 
   virtual std::string to_string(int d) const override {
@@ -998,6 +1070,42 @@ public:
   };
 };
 
+class ReturnAST : public StmtAST {
+public:
+  std::unique_ptr<ExprAST> expression;
+
+  ReturnAST(ptrVec<ASTNode>&& expression) { castToDerived<ASTNode, ExprAST>(expression, this->expression); };
+  ReturnAST(){};
+
+  virtual Value* codegen() override {
+    // create return instruction, widen if needed
+    // ERROR - IF YOU NEED TO NARROW
+    Function* TheFunction = Builder.GetInsertBlock()->getParent();
+    Value* RetVal = expression->codegen();
+    if (compareTypes(TheFunction->getReturnType(), RetVal->getType())) {
+      // if the function type is larger or equal than the return value type we can widen
+      widenLtoR(RetVal, TheFunction->getReturnType());
+      Builder.CreateRet(RetVal);
+    } else {
+      // ERROR
+    }
+    return RetVal;
+  };
+
+  virtual std::string to_string(int d) const override {
+    std::string str = "";
+    addIndents(d, str);
+    str += "<Return>\n";
+
+    if (expression) {
+      str += expression->to_string(d + 1);
+    }
+    addIndents(d, str);
+    str += "</Return>\n";
+    return str;
+  };
+};
+
 class BlockAST : public StmtAST {
   ptrVec<VarDeclAST> localDecls;
   ptrVec<StmtAST> stmts;
@@ -1009,20 +1117,35 @@ public:
   }
 
   virtual Value* codegen() override {
+    numBlocks++;
     Value* returnVal = nullptr;
+    // push new symbol table for this block if we arent in an immediate function block
+    if (!isFunctionBlock) {
+      tables.push_back(SymbolTable());
+    }
 
     for (auto& local : localDecls) {
       local->codegen();
     }
+
+    isFunctionBlock = false;
+
     for (auto& stmt : stmts) {
-      if(dynamic_cast<ReturnAST*>(stmt.get())){
-        //found return stmt
+      if (dynamic_cast<ReturnAST*>(stmt.get())) {
+        // found return stmt
         returnVal = stmt->codegen();
-      }
-      else{
+        numReturns++;
+        // stop any other codegen (stmts should be in order)
+        break;
+      } else {
         stmt->codegen();
       }
     }
+
+    // pop the symbol table - we are done codegening everything inside this block, ie. we are now leaving the scope
+    tables.pop_back();
+
+    return returnVal;
   };
 
   virtual std::string to_string(int d) const override {
@@ -1066,20 +1189,16 @@ public:
 
     Builder.SetInsertPoint(ifBlock);
     body->codegen();
+    Builder.CreateBr(end);
 
     // TODO
     elseBlock->insertInto(TheFunction);
-
-    Builder.CreateBr(end);
-
     Builder.SetInsertPoint(elseBlock);
-    elseBody->codegen();
 
+    elseBody->codegen();
+    Builder.CreateBr(end);
     // TODO
     end->insertInto(TheFunction);
-
-    Builder.CreateBr(end);
-
     Builder.SetInsertPoint(end);
 
     return nullptr;
@@ -1120,20 +1239,20 @@ public:
     Builder.CreateBr(condBlock);
 
     Builder.SetInsertPoint(condBlock);
-    Value* cond = expression->codegen();
-    Value* comp = Builder.CreateICmpNE(cond, Builder.getInt1(false));
+    cond = expression->codegen();
+    comp = Builder.CreateICmpNE(cond, Builder.getInt1(false));
 
     Builder.CreateCondBr(comp, whileBlock, end);
 
     // TODO
     whileBlock->insertInto(TheFunction);
     Builder.SetInsertPoint(whileBlock);
+
     stmt->codegen();
     Builder.CreateBr(condBlock);
 
     // TODO
     end->insertInto(TheFunction);
-
     Builder.SetInsertPoint(end);
   };
 
@@ -1145,29 +1264,6 @@ public:
     str += stmt->to_string(d + 1);
     addIndents(d, str);
     str += "</While>";
-    return str;
-  };
-};
-
-class ReturnAST : public StmtAST {
-public:
-  std::unique_ptr<ExprAST> expression;
-
-  ReturnAST(ptrVec<ASTNode>&& expression) { castToDerived<ASTNode, ExprAST>(expression, this->expression); };
-  ReturnAST(){};
-
-  virtual Value* codegen() override { return expression->codegen(); };
-
-  virtual std::string to_string(int d) const override {
-    std::string str = "";
-    addIndents(d, str);
-    str += "<Return>\n";
-
-    if (expression) {
-      str += expression->to_string(d + 1);
-    }
-    addIndents(d, str);
-    str += "</Return>\n";
     return str;
   };
 };
@@ -1234,6 +1330,10 @@ public:
   FuncDeclAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name) : DeclAST(std::move(type), std::move(name)){};
 
   virtual Value* codegen() override {
+    // set num blocks and num returns to 0 again, new function
+    numBlocks = 0;
+    numReturns = 0;
+
     Function* TheFunction = TheModule->getFunction(prototype->name);
     if (!TheFunction)
       TheFunction = (Function*)prototype->codegen();
@@ -1250,16 +1350,33 @@ public:
       Builder.CreateStore(&Arg, Alloca);
       newTable[std::string(Arg.getName())] = Alloca;
     }
+
+    tables.push_back(newTable);
+
+    // so that we keep the same scope table when we are codegening the block
+    isFunctionBlock = true;
+
+    // every block will either branch or return apart from this last one
+    // we need to check if we return, if not we need to error or add void return
     if (Value* RetVal = block->codegen()) {
       // Finish off the function.
-      if(!RetVal){
-        //void function
-        //ERROR HANDLE I GUESS
-        Builder.CreateRetVoid();
+      if (!RetVal) {
+        // void function, or we have a return statement in every control flow path
+        if (numBlocks == numReturns || TheFunction->getReturnType()->isVoidTy()) {
+          Builder.CreateRetVoid();
+        }
+        // ERROR HANDLE IF NOT either though
       }
-      Builder.CreateRet(RetVal);
+
+      if (compareTypes(TheFunction->getReturnType(), RetVal->getType())) {
+        // if the function type is larger than the return value type we can widen
+        widenLtoR(RetVal, TheFunction->getReturnType());
+        Builder.CreateRet(RetVal);
+      } else {
+        // ERROR
+      }
     }
-    // Validate the generated code, checking
+
     verifyFunction(*TheFunction);
 
     return TheFunction;
@@ -1284,7 +1401,9 @@ class FactorAST : public ExprAST {
 public:
   std::unique_ptr<PrimaryAST> expression;
   FactorAST(ptrVec<ASTNode> expression) { castToDerived<ASTNode, PrimaryAST>(expression, this->expression); };
-  virtual Value* codegen() override{};
+
+  virtual Value* codegen() override { return expression->codegen(); };
+
   virtual std::string to_string(int d) const override {
     std::string str = "";
     addIndents(d, str);
@@ -1330,7 +1449,16 @@ public:
     return str;
   }
 
-  virtual Value* codegen() override{};
+  virtual Value* codegen() override {
+    for (auto& externNode : externList) {
+      externNode->codegen();
+    }
+    for (auto& declNode : declList) {
+      declNode->codegen();
+    }
+
+    return nullptr;
+  };
 };
 
 std::unordered_map<std::string, std::function<std::vector<std::unique_ptr<ASTNode>>()>> functionMap;

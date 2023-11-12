@@ -1,6 +1,6 @@
 CXX=clang++ -std=c++20
 CFLAGS= -g -O3 `llvm-config --cppflags --ldflags --system-libs --libs all` \
--Wno-unused-function -Wno-unknown-warning-option -fno-rtti
+-Wno-unused-function -Wno-unknown-warning-option -frtti
 OUTPUT = mccomp
 SOURCES = mccomp.cpp computeSets.cpp
 OBJECTS = $(SOURCES:.cpp=.o)
