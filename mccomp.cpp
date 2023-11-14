@@ -475,24 +475,24 @@ Tables tables;
 GlobalTable globalTable;
 
 void printTables(const Tables& tables) {
-    for (size_t i = 0; i < tables.size(); ++i) {
-        std::cout << "Table " << i << ":\n";
-        for (const auto& pair : tables[i]) {
-            std::cout << "  Key: " << pair.first << ", AllocaInst*: ";
+  for (size_t i = 0; i < tables.size(); ++i) {
+    std::cout << "Table " << i << ":\n";
+    for (const auto& pair : tables[i]) {
+      std::cout << "  Key: " << pair.first << ", AllocaInst*: ";
 
-            if (pair.second != nullptr) {
-                // Print some identifiable information about AllocaInst
-                // This depends on what members/methods AllocaInst has.
-                // For example:
-                // std::cout << pair.second->someIdentifierMethod();
-                std::cout << static_cast<void*>(pair.second); // As an example, print the pointer value
-            } else {
-                std::cout << "nullptr";
-            }
+      if (pair.second != nullptr) {
+        // Print some identifiable information about AllocaInst
+        // This depends on what members/methods AllocaInst has.
+        // For example:
+        // std::cout << pair.second->someIdentifierMethod();
+        std::cout << static_cast<void*>(pair.second); // As an example, print the pointer value
+      } else {
+        std::cout << "nullptr";
+      }
 
-            std::cout << "\n";
-        }
+      std::cout << "\n";
     }
+  }
 }
 
 Type* stringToPtrType(std::string type) {
@@ -547,7 +547,7 @@ static AllocaInst* CreateEntryBlockAlloca(Function* TheFunction, const std::stri
 
 // widens left to right
 // returns the widest type out of both values
-Type* widenLtoR(Value* leftVal, Type* rightType) {
+Value* widenLtoR(Value* leftVal, Type* rightType) {
 
   Type* leftType = leftVal->getType();
   // widen as much as needed first
@@ -555,12 +555,12 @@ Type* widenLtoR(Value* leftVal, Type* rightType) {
 
   if (leftType->isFloatTy()) {
     // no widening to be done
-    return leftType;
+    return leftVal;
   }
 
   if (rightType->isFloatTy()) {
-    leftVal = Builder.CreateSIToFP(leftVal, Type::getFloatTy(TheContext));
-    return rightType;
+    Value* newVal = Builder.CreateSIToFP(leftVal, Type::getFloatTy(TheContext));
+    return newVal;
   } else {
     // check the bit width of the integers we are dealing with
     // if they are not the same, then we need to widen the smaller one
@@ -573,29 +573,34 @@ Type* widenLtoR(Value* leftVal, Type* rightType) {
     Type* int32type = Type::getInt32Ty(TheContext);
 
     if (widthRight > widthLeft) {
-      leftVal = Builder.CreateSExt(leftVal, int32type);
+      Value* newVal = Builder.CreateSExt(leftVal, int32type);
+      return newVal;
     }
+
+    return leftVal;
   }
-  return leftType;
 }
 
 // return widest type
-Type* narrowLtoR(Value* leftVal, Type* rightType) {
+Value* narrowLtoR(Value* leftVal, Type* rightType) {
 
   Type* leftType = leftVal->getType();
   // widen as much as needed first
   // bool = int = 13 < int = 13 < float = 2
 
   if (rightType->isFloatTy()) {
-    return rightType;
+    return leftVal;
   } else {
+    Value* newVal;
     if (leftType->isFloatTy()) {
-      leftVal = Builder.CreateFPToSI(leftVal, Type::getFloatTy(TheContext));
+      newVal = Builder.CreateFPToSI(leftVal, Type::getFloatTy(TheContext));
+    } else {
+      newVal = leftVal;
     }
     // check the bit width of the integers we are dealing with
     // if they are not the same, then we need to widen the smaller one
 
-    IntegerType* intLeft = cast<IntegerType>(leftVal->getType());
+    IntegerType* intLeft = cast<IntegerType>(newVal->getType());
     unsigned widthLeft = intLeft->getIntegerBitWidth();
 
     IntegerType* intRight = cast<IntegerType>(rightType);
@@ -604,11 +609,11 @@ Type* narrowLtoR(Value* leftVal, Type* rightType) {
     Type* int1type = Type::getInt1Ty(TheContext);
 
     if (widthLeft > widthRight) {
-      leftVal = Builder.CreateTrunc(leftVal, int1type);
+      Value* newNewVal = Builder.CreateTrunc(newVal, int1type);
+      return newNewVal;
     }
+    return newVal;
   }
-
-  return leftType;
 }
 
 Value* trueValue = ConstantInt::get(Type::getInt1Ty(TheContext), 1, false);
@@ -639,16 +644,16 @@ public:
     //  if integer/float, and we have a !, cast to bool (i think check with jaden)
     if (symbol == "!") {
       // first make sure we cast to bool if needed
-      narrowLtoR(childVal, Type::getInt1Ty(TheContext));
+      Value* narrowedType = narrowLtoR(childVal, Type::getInt1Ty(TheContext));
       // flipit
-      return Builder.CreateXor(childVal, trueValue);
+      return Builder.CreateXor(narrowedType, trueValue);
     }
     if (symbol == "-") {
-      Type* widestType = widenLtoR(childVal, Type::getInt32Ty(TheContext));
-      if (widestType->isFloatTy()) {
-        return Builder.CreateFNeg(childVal);
+      Value* widestType = widenLtoR(childVal, Type::getInt32Ty(TheContext));
+      if (widestType->getType()->isFloatTy()) {
+        return Builder.CreateFNeg(widestType);
       }
-      return Builder.CreateSub(zeroValue, childVal);
+      return Builder.CreateSub(zeroValue, widestType);
     }
 
     return nullptr;
@@ -668,11 +673,7 @@ public:
 
 class PrimaryAST : public ExprAST {
 public:
-
-  virtual Value* codegen() override{
-  };
-
-  virtual std::string to_string(int d) const override{};
+  virtual Value* codegen() override { return nullptr; };
 };
 
 class StorageAST : public ASTNode {
@@ -680,8 +681,7 @@ class StorageAST : public ASTNode {
 public:
   std::string value;
   StorageAST(std::string value) : value(value){};
-  virtual Value* codegen() override{};
-  virtual std::string to_string(int d) const override{};
+  virtual Value* codegen() override { return nullptr; };
 };
 
 /// IntASTNode - Class for integer literals like 1, 2, 10,
@@ -805,13 +805,14 @@ public:
 
   virtual Value* codegen() override {
     // get first table with this variable innit
+    // CHECK GLOBAL VARS
     for (int i = tables.size() - 1; i >= 0; i--) {
       if (tables[i].find(name) != tables[i].end()) {
-        std::cout << tables[i][name]->getAllocatedType()->isIntegerTy() << " var found " + name << std::endl;
         return Builder.CreateLoad(tables[i][name]->getAllocatedType(), tables[i][name], name);
       }
       // ERROR HANDLE - VARIABLE NOT DECLARED, OR NO VALUE STORED
     }
+    return nullptr;
   };
 
   virtual std::string to_string(int d) const override {
@@ -840,9 +841,6 @@ public:
   };
 
   DeclAST(){};
-
-  virtual Value* codegen() override{};
-  virtual std::string to_string(int d) const override{};
 };
 
 class BinOpAST : public ExprAST {
@@ -864,54 +862,23 @@ public:
     Value* leftVal = this->left->codegen();
     Value* rightVal = this->right->codegen();
 
-    Type* widestType = widenLtoR(leftVal, rightVal->getType());
-    widenLtoR(rightVal, leftVal->getType());
-
     // now both leftVal and rightVal should be the same type
     // both floats if minTypeId == Type::FloatTyID, both 32 bit ints otherwise
 
     Value* res;
 
-    if (op == "*") {
-      res = Builder.CreateMul(leftVal, rightVal);
-    } else if (op == "/") {
-      if (widestType->isFloatTy()) {
-        res = Builder.CreateFDiv(leftVal, rightVal);
-      }
-      res = Builder.CreateSDiv(leftVal, rightVal);
-    } else if (op == "%") {
-      if (widestType->isFloatTy()) {
-        res = Builder.CreateFRem(leftVal, rightVal);
-      }
-      res = Builder.CreateSRem(leftVal, rightVal);
-    } else if (op == "+") {
-      res = Builder.CreateAdd(leftVal, rightVal);
-    } else if (op == "-") {
-      res = Builder.CreateSub(leftVal, rightVal);
-    } else if (op == "==") {
-      res = Builder.CreateICmpEQ(leftVal, rightVal);
-    } else if (op == ">=") {
-      res = Builder.CreateICmpSGE(leftVal, rightVal);
-    } else if (op == "<=") {
-      res = Builder.CreateICmpSLE(leftVal, rightVal);
-    } else if (op == "!=") {
-      res = Builder.CreateICmpNE(leftVal, rightVal);
-    } else if (op == ">") {
-      res = Builder.CreateICmpSGT(leftVal, rightVal);
-    } else if (op == "<") {
-      res = Builder.CreateICmpSLT(leftVal, rightVal);
-    } else if (op == "&&") {
+    if (op == "&&") {
       Function* TheFunction = Builder.GetInsertBlock()->getParent();
       BasicBlock* entry = BasicBlock::Create(TheContext, "entry", TheFunction);
       BasicBlock* evalRight = BasicBlock::Create(TheContext, "evalRight");
       BasicBlock* end = BasicBlock::Create(TheContext, "end");
       Builder.SetInsertPoint(entry);
 
-      narrowLtoR(leftVal, Type::getInt1Ty(TheContext));
-      narrowLtoR(rightVal, Type::getInt1Ty(TheContext));
+      Value* narrowedTypeLeft = narrowLtoR(leftVal, Type::getInt1Ty(TheContext));
+      Value* narrowedTypeRight = narrowLtoR(rightVal, Type::getInt1Ty(TheContext));
 
       // Check if A is false
-      Value* condA = Builder.CreateICmpNE(leftVal, Builder.getInt1(false));
+      Value* condA = Builder.CreateICmpNE(narrowedTypeLeft, Builder.getInt1(false));
 
       // TODO- EMAIL FINNBARR ABOUT THIS
       evalRight->insertInto(TheFunction);
@@ -927,9 +894,9 @@ public:
       Builder.SetInsertPoint(end);
       PHINode* phi = Builder.CreatePHI(Builder.getInt1Ty(), 2);
       phi->addIncoming(Builder.getInt1(false), entry); // A is false
-      phi->addIncoming(rightVal, evalRight);                  // Result of B
+      phi->addIncoming(narrowedTypeRight, evalRight);  // Result of B
 
-      res = Builder.CreateAnd(leftVal, phi);
+      return Builder.CreateAnd(narrowedTypeLeft, phi);
     } else if (op == "||") {
       Function* TheFunction = Builder.GetInsertBlock()->getParent();
       BasicBlock* entry = BasicBlock::Create(TheContext, "entry", TheFunction);
@@ -937,11 +904,11 @@ public:
       BasicBlock* end = BasicBlock::Create(TheContext, "end");
       Builder.SetInsertPoint(entry);
 
-      narrowLtoR(leftVal, Type::getInt1Ty(TheContext));
-      narrowLtoR(rightVal, Type::getInt1Ty(TheContext));
+      Value* narrowedTypeLeft = narrowLtoR(leftVal, Type::getInt1Ty(TheContext));
+      Value* narrowedTypeRight = narrowLtoR(rightVal, Type::getInt1Ty(TheContext));
 
       // Check if A is false
-      Value* condA = Builder.CreateICmpNE(leftVal, Builder.getInt1(true));
+      Value* condA = Builder.CreateICmpNE(narrowedTypeLeft, Builder.getInt1(true));
 
       // TODO- EMAIL FINNBARR ABOUT THIS
       evalRight->insertInto(TheFunction);
@@ -956,9 +923,79 @@ public:
       Builder.SetInsertPoint(end);
       PHINode* phi = Builder.CreatePHI(Builder.getInt1Ty(), 2);
       phi->addIncoming(Builder.getInt1(true), entry); // A is true
-      phi->addIncoming(rightVal, evalRight);                 // Result of B
+      phi->addIncoming(narrowedTypeRight, evalRight); // Result of B
 
-      res = Builder.CreateOr(leftVal, phi);
+      return Builder.CreateOr(narrowedTypeLeft, phi);
+    }
+
+    Value* widestTypeLeft = widenLtoR(leftVal, rightVal->getType());
+    Value* widestTypeRight = widenLtoR(rightVal, leftVal->getType());
+
+    // ERROR - CHECK FOR DIVIDE BY ZERO IF INTEGERS
+    // CHECK FOR NAN IF FLOATS
+    // maybe just do the below
+    // ALSO CHECK FOR NAN IN VARIABLE ASSIGNMENTS AND RETURN STMTS AND CONDITIONS
+    if (op == "*") {
+      if (widestTypeLeft->getType()->isFloatTy()) {
+        return Builder.CreateFMul(widestTypeLeft, widestTypeRight);
+      }
+      return Builder.CreateMul(widestTypeLeft, widestTypeRight);
+    } else if (op == "/") {
+      if (widestTypeLeft->getType()->isFloatTy()) {
+
+        std::cout << "widestTypeLeft type: " + widestTypeRight->getType()->isFloatTy() << " " + widestTypeRight->getType()->isIntegerTy(32) << std::endl;
+
+        return Builder.CreateFDiv(widestTypeLeft, widestTypeRight);
+      }
+      return Builder.CreateSDiv(widestTypeLeft, widestTypeRight);
+
+    } else if (op == "%") {
+      if (widestTypeLeft->getType()->isFloatTy()) {
+        return Builder.CreateFRem(widestTypeLeft, widestTypeRight);
+      }
+      return Builder.CreateSRem(widestTypeLeft, widestTypeRight);
+
+    } else if (op == "+") {
+      if (widestTypeLeft->getType()->isFloatTy()) {
+        return Builder.CreateFAdd(widestTypeLeft, widestTypeRight);
+      }
+      return Builder.CreateAdd(widestTypeLeft, widestTypeRight);
+
+    } else if (op == "-") {
+      if (widestTypeLeft->getType()->isFloatTy()) {
+        return Builder.CreateFSub(widestTypeLeft, widestTypeRight);
+      }
+      return Builder.CreateSub(widestTypeLeft, widestTypeRight);
+    } else if (op == "==") {
+      if (widestTypeLeft->getType()->isFloatTy()) {
+        return Builder.CreateFCmpUEQ(widestTypeLeft, widestTypeRight);
+      }
+      return Builder.CreateICmpEQ(widestTypeLeft, widestTypeRight);
+    } else if (op == ">=") {
+      if (widestTypeLeft->getType()->isFloatTy()) {
+        return Builder.CreateFCmpUGE(widestTypeLeft, widestTypeRight);
+      }
+      return Builder.CreateICmpSGE(widestTypeLeft, widestTypeRight);
+    } else if (op == "<=") {
+      if (widestTypeLeft->getType()->isFloatTy()) {
+        return Builder.CreateFCmpULE(widestTypeLeft, widestTypeRight);
+      }
+      return Builder.CreateICmpSLE(widestTypeLeft, widestTypeRight);
+    } else if (op == "!=") {
+      if (widestTypeLeft->getType()->isFloatTy()) {
+        return Builder.CreateFCmpONE(widestTypeLeft, widestTypeRight);
+      }
+      return Builder.CreateICmpNE(widestTypeLeft, widestTypeRight);
+    } else if (op == ">") {
+      if (widestTypeLeft->getType()->isFloatTy()) {
+        return Builder.CreateFCmpUGT(widestTypeLeft, widestTypeRight);
+      }
+      return Builder.CreateICmpSGT(widestTypeLeft, widestTypeRight);
+    } else if (op == "<") {
+      if (widestTypeLeft->getType()->isFloatTy()) {
+        return Builder.CreateFCmpULT(widestTypeLeft, widestTypeRight);
+      }
+      return Builder.CreateICmpSLT(widestTypeLeft, widestTypeRight);
     }
 
     return res;
@@ -993,13 +1030,12 @@ public:
       gvar->setAlignment(MaybeAlign(4));
       gvar->setInitializer(getDefaultConst(typePtr));
       globalTable[name] = gvar;
+      return gvar;
     } else {
-      std::cout << "parent: " + Builder.GetInsertBlock()->getParent()->getName().str() << " name: " + name << std::endl;
-      std::cout << "typeptr: " << std::endl;
       typePtr->print(llvm::outs());
       AllocaInst* alloca = CreateEntryBlockAlloca(Builder.GetInsertBlock()->getParent(), name, typePtr);
-      printTables(tables);
       tables[tables.size() - 1][name] = alloca;
+      return alloca;
     }
   };
 
@@ -1015,7 +1051,7 @@ public:
 class ParamAST : public VarDeclAST {
 public:
   ParamAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name) : VarDeclAST(std::move(type), std::move(name)){};
-  virtual Value* codegen() override{};
+  virtual Value* codegen() override { return nullptr; };
   virtual std::string to_string(int d) const override {
     std::string str = "";
     addIndents(d, str);
@@ -1049,9 +1085,9 @@ public:
       for (int i = tables.size() - 1; i >= 0; i--) {
         if (tables[i].find(name) != tables[i].end()) {
           // need to widen/narrow as required
-          widenLtoR(expressionVal, tables[i][name]->getAllocatedType());
-          narrowLtoR(expressionVal, tables[i][name]->getAllocatedType());
-          valAssigned = Builder.CreateStore(expressionVal, tables[i][name]);
+          Value* widestType = widenLtoR(expressionVal, tables[i][name]->getAllocatedType());
+          Value* narrowedType = narrowLtoR(widestType, tables[i][name]->getAllocatedType());
+          valAssigned = Builder.CreateStore(narrowedType, tables[i][name]);
         }
       }
     }
@@ -1103,15 +1139,23 @@ public:
     // create return instruction, widen if needed
     // ERROR - IF YOU NEED TO NARROW
     Function* TheFunction = Builder.GetInsertBlock()->getParent();
-    Value* RetVal = expression->codegen();
-    if (compareTypes(TheFunction->getReturnType(), RetVal->getType())) {
-      // if the function type is larger or equal than the return value type we can widen
-      widenLtoR(RetVal, TheFunction->getReturnType());
-      Builder.CreateRet(RetVal);
+
+    // if void return
+    if (!expression) {
+      Builder.CreateRetVoid();
+      return nullptr;
     } else {
-      // ERROR
+      Value* RetVal = expression->codegen();
+      if (compareTypes(TheFunction->getReturnType(), RetVal->getType())) {
+        // if the function type is larger or equal than the return value type we can widen
+        Value* widestType = widenLtoR(RetVal, TheFunction->getReturnType());
+        Builder.CreateRet(widestType);
+        return RetVal;
+
+      } else {
+        // ERROR
+      }
     }
-    return RetVal;
   };
 
   virtual std::string to_string(int d) const override {
@@ -1139,7 +1183,6 @@ public:
   }
 
   virtual Value* codegen() override {
-    numBlocks++;
     Value* returnVal = nullptr;
     // push new symbol table for this block if we arent in an immediate function block
     if (!isFunctionBlock) {
@@ -1201,24 +1244,38 @@ public:
   virtual Value* codegen() override {
     Function* TheFunction = Builder.GetInsertBlock()->getParent();
     BasicBlock* ifBlock = BasicBlock::Create(TheContext, "if", TheFunction);
-    BasicBlock* elseBlock = BasicBlock::Create(TheContext, "else");
+
+    BasicBlock* elseBlock;
+    if (elseBody) {
+      elseBlock = BasicBlock::Create(TheContext, "else");
+    }
     BasicBlock* end = BasicBlock::Create(TheContext, "end");
 
     Value* cond = expression->codegen();
     Value* comp = Builder.CreateICmpNE(cond, Builder.getInt1(false));
 
-    Builder.CreateCondBr(comp, ifBlock, elseBlock);
+    if (elseBody) {
+      Builder.CreateCondBr(comp, ifBlock, elseBlock);
+
+    } else {
+      Builder.CreateCondBr(comp, ifBlock, end);
+    }
 
     Builder.SetInsertPoint(ifBlock);
     body->codegen();
+    numBlocks++;
     Builder.CreateBr(end);
 
     // TODO
-    elseBlock->insertInto(TheFunction);
-    Builder.SetInsertPoint(elseBlock);
+    if (elseBody) {
+      elseBlock->insertInto(TheFunction);
+      Builder.SetInsertPoint(elseBlock);
 
-    elseBody->codegen();
-    Builder.CreateBr(end);
+      elseBody->codegen();
+      numBlocks++;
+      Builder.CreateBr(end);
+    }
+
     // TODO
     end->insertInto(TheFunction);
     Builder.SetInsertPoint(end);
@@ -1271,11 +1328,15 @@ public:
     Builder.SetInsertPoint(whileBlock);
 
     stmt->codegen();
+    numBlocks++;
+
     Builder.CreateBr(condBlock);
 
     // TODO
     end->insertInto(TheFunction);
     Builder.SetInsertPoint(end);
+
+    return nullptr;
   };
 
   virtual std::string to_string(int d) const override {
@@ -1368,7 +1429,6 @@ public:
     // make a new symbol table, push to tables, record argument names
     SymbolTable newTable;
     for (auto& Arg : TheFunction->args()) {
-      std::cout << "alrg type: " << Arg.getType()->isIntegerTy() << std::endl;
       AllocaInst* Alloca = CreateEntryBlockAlloca(TheFunction, std::string(Arg.getName()), Arg.getType());
       Builder.CreateStore(&Arg, Alloca);
       newTable[std::string(Arg.getName())] = Alloca;
@@ -1379,28 +1439,28 @@ public:
     // so that we keep the same scope table when we are codegening the block
     isFunctionBlock = true;
 
-    // every block will either branch or return apart from this last one
-    // we need to check if we return, if not we need to error or add void return
-    if (Value* RetVal = block->codegen()) {
-      // Finish off the function.
-      if (!RetVal) {
-        // void function, or we have a return statement in every control flow path
-        if (numBlocks == numReturns || TheFunction->getReturnType()->isVoidTy()) {
-          Builder.CreateRetVoid();
-        }
-        // ERROR HANDLE IF NOT either though
+    // codegen the body
+    block->codegen();
+
+    // every block will either branch or return apart from this last one POTENTIALLY (if there is nothing after an if/while statement end block) so check verify function
+    // verifyFunction will return true if the final block is empty
+    if (verifyFunction(*TheFunction)) {
+      // we are always allowed to pad the function if its void
+      if (TheFunction->getReturnType()->isVoidTy()) {
+        Builder.CreateRetVoid();
       }
 
-      if (compareTypes(TheFunction->getReturnType(), RetVal->getType())) {
-        // if the function type is larger than the return value type we can widen
-        widenLtoR(RetVal, TheFunction->getReturnType());
-        Builder.CreateRet(RetVal);
+      else if (numReturns == 0) {
+        // if we have 0 returns, and its not void, error
+        // ERROR
+      } else if (numBlocks == numReturns) {
+        // if we have returns in every control flow, then we can pad out the final block with a dummy return instruction
+        // this is technically stricter than it needs to be (should be every _reachable_ control flow)
+        Builder.CreateRetVoid();
       } else {
         // ERROR
       }
     }
-
-    verifyFunction(*TheFunction);
 
     return TheFunction;
   };
@@ -1445,8 +1505,7 @@ public:
 
   PartialFuncDeclAST(){};
 
-  virtual Value* codegen() override{};
-  virtual std::string to_string(int d) const override{};
+  virtual Value* codegen() override { return nullptr; };
 };
 
 class ProgramAST : public ASTNode {
@@ -1511,9 +1570,9 @@ nonTerminalInfo nonterminal(const std::string& name) {
   nonTerminalInfo result;
   std::vector<std::string> epsilonRule;
 
-  std::string typeLiteralString = typeToString.contains(CurTok.type) ? typeToString[CurTok.type] : "";
+  std::string typeLiteralString = typeToString.find(CurTok.type) != typeToString.end() ? typeToString[CurTok.type] : "";
 
-  if (productions.contains(name)) {
+  if (productions.find(name) != productions.end()) {
     auto& rules = productions[name];
 
     for (auto& rule : rules) {
@@ -1522,12 +1581,11 @@ nonTerminalInfo nonterminal(const std::string& name) {
 
       // incase we need to use follow set n shit
       // this is assuming theres only one epsilon rule to choose (which there should be, most stuff is LL(1))
-      if (firstSets[firstSymbol].contains("''")) {
-        std::cout << "epsilon runnin for: " + name << std::endl;
+      if (firstSets[firstSymbol].find("''") != firstSets[firstSymbol].end()) {
         epsilonRule = rule;
       }
 
-      if (firstSets[firstSymbol].contains(CurTok.lexeme) || firstSets[firstSymbol].contains(typeLiteralString)) {
+      if (firstSets[firstSymbol].find(CurTok.lexeme) != firstSets[firstSymbol].end() || firstSets[firstSymbol].find(typeLiteralString) != firstSets[firstSymbol].end()) {
 
         // hack to get expr working
         if (name == "expr") {
@@ -1549,20 +1607,16 @@ nonTerminalInfo nonterminal(const std::string& name) {
         for (std::string symbol : rule) {
           // shouldn't be any overlap in firstSets (except for when we get to expr)
           // so this should only 'match' one rule
-          typeLiteralString = typeToString.contains(CurTok.type) ? typeToString[CurTok.type] : "";
+          typeLiteralString = typeToString.find(CurTok.type) != typeToString.end() ? typeToString[CurTok.type] : "";
 
           std::string symbolNoQuotes = removeCharacter(symbol, '"');
-          std::cout << "symbol: " + symbol << " currTok lexem: " + CurTok.lexeme << "poo " + CurTok.columnNo << std::endl;
           if (isTerminal(symbol) && (symbolNoQuotes == CurTok.lexeme || symbolNoQuotes == typeLiteralString)) {
 
             result[symbolNoQuotes].push_back(std::make_unique<StorageAST>(CurTok.lexeme));
             getNextToken();
-            std::cout << "got next tok: " + CurTok.lexeme << " poo :" + CurTok.columnNo << std::endl;
 
           } else if (!isTerminal(symbol)) {
-            std::cout << "pushing symbol: " + symbol << " for name: " + name << std::endl;
             result[symbol] = functionMap[symbol]();
-            printMap(result);
           } else {
             // symbol was a terminal but didnt match CurTok
             throwError({symbol}, CurTok.lexeme);
@@ -1578,10 +1632,9 @@ nonTerminalInfo nonterminal(const std::string& name) {
     if (!foundMatch) {
       // see if we should use an available epsilon production
       //'using' the production just entails returning an empty result map for this nonterminal
-      if (!(!epsilonRule.empty() && (followSets[name].contains(CurTok.lexeme) || followSets[name].contains(typeLiteralString)))) {
+      if (!(!epsilonRule.empty() && (followSets[name].find(CurTok.lexeme) != followSets[name].end() || followSets[name].find(typeLiteralString) != followSets[name].end()))) {
         throwError(expected, CurTok.lexeme);
       } else {
-        std::cout << "used epsilon rule " << std::endl;
       }
     }
   } else {
@@ -1678,7 +1731,7 @@ ptrVec<ASTNode> decl() {
   ptrVec<ASTNode> res;
 
   // get type
-  if (info.contains("var_type")) {
+  if (info.find("var_type") != info.end()) {
     // var declaration
     type = std::move(info["var_type"]);
   } else {
@@ -1687,7 +1740,7 @@ ptrVec<ASTNode> decl() {
 
   // fill in params and block if a function declaration
 
-  if (info.contains("decl'")) {
+  if (info.find("decl'") != info.end()) {
     std::unique_ptr<PartialFuncDeclAST> halfBakedFuncDecl;
 
     castToDerived<ASTNode, PartialFuncDeclAST>(info["decl'"], halfBakedFuncDecl);
@@ -1701,7 +1754,7 @@ ptrVec<ASTNode> decl() {
       res.push_back(std::make_unique<FuncDeclAST>(std::move(type), std::move(identifier), std::move(halfBakedFuncDecl->params), std::move(halfBakedFuncDecl->block)));
     }
 
-  } else if (info.contains("params")) {
+  } else if (info.find("params") != info.end()) {
     // build a whole new func decl AST here
     res.push_back(std::make_unique<FuncDeclAST>(std::move(type), std::move(identifier), std::move(info["params"]), std::move(info["block"])));
   }
@@ -1715,7 +1768,7 @@ ptrVec<ASTNode> decl_prime() {
   nonTerminalInfo info = nonterminal("decl'");
   ptrVec<ASTNode> res;
 
-  if (info.contains(";")) {
+  if (info.find(";") != info.end()) {
     // variable decl, push an empty func decl ast to signal this
     res.push_back(std::make_unique<PartialFuncDeclAST>());
   } else {
@@ -1729,7 +1782,7 @@ ptrVec<ASTNode> decl_prime() {
 ptrVec<ASTNode> type_spec() {
   nonTerminalInfo info = nonterminal("type_spec");
 
-  if (info.contains("var_type")) {
+  if (info.find("var_type") != info.end()) {
     return std::move(info["var_type"]);
   } else {
     return std::move(info["void"]);
@@ -1746,7 +1799,7 @@ ptrVec<ASTNode> params() {
   nonTerminalInfo info = nonterminal("params");
 
   // in minic, no parameters and 'void' mean the same thing
-  if (info.size() == 0 || info.contains("void")) {
+  if (info.size() == 0 || info.find("void") != info.end()) {
     return ptrVec<ASTNode>{};
   } else {
     return std::move(info["param_list"]);
@@ -1850,7 +1903,7 @@ ptrVec<ASTNode> expr_stmt() {
 
   ptrVec<ASTNode> res;
 
-  if (info.contains("expr")) {
+  if (info.find("expr") != info.end()) {
     res.push_back(std::make_unique<ExprStmtAST>(std::move(info["expr"])));
   } else {
     res.push_back(std::make_unique<ExprStmtAST>());
@@ -1895,7 +1948,7 @@ ptrVec<ASTNode> return_stmt_prime() {
   nonTerminalInfo info = nonterminal("return_stmt'");
 
   ptrVec<ASTNode> res;
-  if (info.contains("expr")) {
+  if (info.find("expr") != info.end()) {
     res.push_back(std::make_unique<ReturnAST>(std::move(info["expr"])));
   } else {
     res.push_back(std::make_unique<ReturnAST>());
@@ -1908,7 +1961,7 @@ ptrVec<ASTNode> expr() {
   nonTerminalInfo info = nonterminal("expr");
 
   ptrVec<ASTNode> res;
-  if (info.contains("IDENT")) {
+  if (info.find("IDENT") != info.end()) {
     res.push_back(std::make_unique<VarAssignAST>(std::move(info["IDENT"]), std::move(info["expr"])));
   } else {
     // BinOpExpr node is returned
@@ -2018,7 +2071,7 @@ ptrVec<ASTNode> factor() {
   nonTerminalInfo info = nonterminal("factor");
   ptrVec<ASTNode> res;
 
-  if (info.contains("primary")) {
+  if (info.find("primary") != info.end()) {
     res.push_back(std::make_unique<FactorAST>(std::move(info["primary"])));
   } else {
     ptrVec<ASTNode> factor = std::move(info["factor"]);
@@ -2035,20 +2088,20 @@ ptrVec<ASTNode> primary() {
   nonTerminalInfo info = nonterminal("primary");
   ptrVec<ASTNode> res;
 
-  if (info.contains("IDENT")) {
+  if (info.find("IDENT") != info.end()) {
     ptrVec<ASTNode>& ident = info["IDENT"];
     if (info["primary'"].size() == 0) {
       res.push_back(std::make_unique<VarCallAST>(std::move(ident)));
     } else {
       res.push_back(std::make_unique<FuncCallAST>(std::move(ident), std::move(info["primary'"])));
     }
-  } else if (info.contains("INT_LIT")) {
+  } else if (info.find("INT_LIT") != info.end()) {
     res.push_back(std::make_unique<IntAST>(std::move(info["INT_LIT"])));
-  } else if (info.contains("FLOAT_LIT")) {
+  } else if (info.find("FLOAT_LIT") != info.end()) {
     res.push_back(std::make_unique<FloatAST>(std::move(info["FLOAT_LIT"])));
-  } else if (info.contains("BOOL_LIT")) {
+  } else if (info.find("BOOL_LIT") != info.end()) {
     res.push_back(std::make_unique<BoolAST>(std::move(info["BOOL_LIT"])));
-  } else if (info.contains("expr")) {
+  } else if (info.find("expr") != info.end()) {
     res.push_back(std::move(info["expr"][0]));
   }
 
@@ -2181,13 +2234,14 @@ int main(int argc, char** argv) {
   lineNo = 1;
   columnNo = 1;
 
-  readGrammar("grammar.txt");
+  readGrammar("/Users/god/C++/cs325/code/grammar.txt");
 
   computeFirst();
-  printFirst();
+  // printFirst();
 
   computeFollow();
-  printFollow();
+
+  // printFollow();
 
   initialiseFunctionMap();
 
@@ -2217,9 +2271,9 @@ int main(int argc, char** argv) {
       return 1;
     } */
   std::unique_ptr<ASTNode> programNode = std::move(parser());
-  llvm::outs() << *programNode << "\n";
+  // llvm::outs() << *programNode << "\n";
   //********************* Start printing final IR **************************
-  // Print out all of the generated code into a file called output.ll
+  //  Print out all of the generated code into a file called output.ll
   auto Filename = "output.ll";
   std::error_code EC;
   raw_fd_ostream dest(Filename, EC, sys::fs::OF_None);

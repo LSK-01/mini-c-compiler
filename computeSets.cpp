@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <algorithm>
 #include <vector>
 
 std::string endOfFile = "0";
@@ -59,13 +60,13 @@ void computeFirst() {
 
 void printFirst() {
   for (const auto& kv : firstSets) {
-    std::cout << "Key (first): " << kv.first << " Values: ";
+    std::cout << "FIRST(" << kv.first << ") = { ";
 
     for (const auto& value : kv.second) {
-      std::cout << value << " ";
+      std::cout << "'" + value + "'" << " ";
     }
 
-    std::cout << std::endl;
+    std::cout << "}" << std::endl;
   }
 }
 
@@ -86,13 +87,13 @@ void sententialForms(std::string& input) {
 
 void printFollow() {
   for (const auto& kv : followSets) {
-    std::cout << "Key (follow): " << kv.first << " Values: ";
+    std::cout << "FOLLOW(" << kv.first << ") = { ";
 
     for (const auto& value : kv.second) {
-      std::cout << value << " ";
+      std::cout << "'" + value + "'" << " ";
     }
 
-    std::cout << std::endl;
+    std::cout << "}" << std::endl;
   }
 }
 
@@ -138,7 +139,6 @@ std::unordered_set<std::string> follow(const std::string& input, std::unordered_
   }
 
   visited.insert(input);
-
   for (auto& prod : productions) {
     const std::string& nonterm = prod.first;
     for (auto& rule : prod.second) {
@@ -150,6 +150,7 @@ std::unordered_set<std::string> follow(const std::string& input, std::unordered_
         }
 
         if (i + 1 == rule.size()) {
+
           if (visited.find(nonterm) == visited.end()) {
             std::unordered_set<std::string> followNonTerm = follow(nonterm, visited);
             if (followNonTerm.empty()) {
@@ -166,7 +167,6 @@ std::unordered_set<std::string> follow(const std::string& input, std::unordered_
           }
         } else {
           int adjCounter = i;
-
           std::string adj = rule[++adjCounter];
 
           if (isTerminal(adj)) {
@@ -188,6 +188,7 @@ std::unordered_set<std::string> follow(const std::string& input, std::unordered_
             if (adjCounter == rule.size() - 1 && nullable(rule[adjCounter])) {
               std::unordered_set<std::string> followNonTerm = follow(nonterm);
               followSets[symbol].insert(followNonTerm.begin(), followNonTerm.end());
+              
             }
           }
         }
@@ -372,7 +373,6 @@ void readGrammar(std::string filename) {
 
       productions[input].push_back(rhs);
     }
-    std::cout << line << std::endl;
   }
   file.close();
 }
