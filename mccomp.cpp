@@ -409,12 +409,13 @@ static void throwParserError(const std::unordered_set<std::string>& expected, st
   for (const auto& element : expected) {
     std::cout << element << ' ';
   }
-  std::cout << "\nFound: " + found;
+  std::cout << "\nFound: " + found << std::endl;
   exit(1);
 }
 
-static void throwCodegenError(std::string message = "") {
+static void throwCodegenError(std::string message, TOKEN token) {
   std::cout << "Encountered an error during compilation: " << message << "\n" << std::endl;
+  std:: cout << "Lexeme: " + token.lexeme + "\nOn line: " + std::to_string(token.lineNo) + " column: " + std::to_string(token.columnNo) << std::endl;
   exit(1);
 }
 //===----------------------------------------------------------------------===//
@@ -616,6 +617,7 @@ Value* zeroValue = ConstantInt::get(Type::getInt32Ty(TheContext), 0, true);
 class ASTNode {
 public:
   // destructor
+  TOKEN token;
   virtual ~ASTNode() = default;
   virtual Value* codegen() = 0;
   virtual std::string to_string(int d) const { return ""; };
@@ -757,11 +759,11 @@ public:
     Function* CalleeF = TheModule->getFunction(name);
 
     if (!CalleeF) {
-      throwCodegenError("Function " + name + " not declared");
+      throwCodegenError("Function " + name + " not declared", token);
     }
 
     if (CalleeF->arg_size() != args.size()) {
-      throwCodegenError("Function " + name + " called with too many arguments. Got: " + to_string(args.size()) + ". Expected: " + to_string(CalleeF->arg_size()));
+      throwCodegenError("Function " + name + " called with too many arguments. Got: " + to_string(args.size()) + ". Expected: " + to_string(CalleeF->arg_size()), token);
     }
 
     std::vector<Value*> ArgsV;
@@ -806,7 +808,7 @@ public:
       return Builder.CreateLoad(globalTable[name]->getValueType(), globalTable[name], name);
     }
 
-    throwCodegenError("Variable " + name + " has not been declared or assigned.");
+    throwCodegenError("Variable " + name + " has not been declared or assigned.", token);
   };
 
   virtual std::string to_string(int d) const override {
@@ -1028,6 +1030,7 @@ public:
     } else {
       typePtr->print(llvm::outs());
       AllocaInst* alloca = CreateEntryBlockAlloca(Builder.GetInsertBlock()->getParent(), name, typePtr);
+      Builder.CreateStore(getDefaultConst(Type::getInt32Ty(TheContext)), alloca);
       tables[tables.size() - 1][name] = alloca;
       return alloca;
     }
@@ -1085,7 +1088,7 @@ public:
       return Builder.CreateStore(expressionVal, globalTable[name]);
     }
 
-    throwCodegenError("Variable " + name + " has not been declared.");
+    throwCodegenError("Variable " + name + " has not been declared.", token);
   };
 
   virtual std::string to_string(int d) const override {
@@ -1180,7 +1183,6 @@ public:
     // push new symbol table for this block if we arent in an immediate function block
     if (!isFunctionBlock) {
       tables.push_back(SymbolTable());
-      std::cout << "    tables size: " + std::to_string(tables.size()) << std::endl;
     }
     isFunctionBlock = false;
 
@@ -1597,6 +1599,10 @@ nonTerminalInfo nonterminal(const std::string& name) {
 
           } else if (!isTerminal(symbol)) {
             result[symbol] = functionMap[symbol]();
+            //add token properties
+            for(auto& node: result[symbol]){
+              node->token = CurTok;
+            }
           } else {
             // symbol was a terminal but didnt match CurTok
             throwParserError({symbol}, CurTok.lexeme);
