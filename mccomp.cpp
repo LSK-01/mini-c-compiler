@@ -398,31 +398,24 @@ static TOKEN getNextToken() {
   return CurTok = temp;
 }
 
-static TOKEN peekNext(int x) {
-  populateBuffer();
-  if (x == 1) {
-    return tok_buffer.front();
-  } else {
-    return tok_buffer[1];
-  }
-}
-
 static TOKEN peekNext() {
   populateBuffer();
   return tok_buffer.front();
 }
 
-// useless af currently
-static void putBackToken(TOKEN tok) { tok_buffer.push_front(tok); }
-
-static void throwError(const std::unordered_set<std::string>& expected, std::string found, std::string message = "") {
-  std::cout << "error: " << message << std::endl;
-  std::cout << "expected: " << std::endl;
+static void throwParserError(const std::unordered_set<std::string>& expected, std::string found) {
+  std::cout << "Encountered an error on line " + std::to_string(lineNo) + " column " + std::to_string(columnNo) + ".\n";
+  std::cout << "Expected one of: ";
   for (const auto& element : expected) {
     std::cout << element << ' ';
   }
-  std::cout << "found: " + found << std::endl;
-  throw std::runtime_error(message);
+  std::cout << "\nFound: " + found;
+  exit(1);
+}
+
+static void throwCodegenError(std::string message = "") {
+  std::cout << "Encountered an error during compilation: " << message << "\n" << std::endl;
+  exit(1);
 }
 //===----------------------------------------------------------------------===//
 // AST nodes
@@ -460,8 +453,6 @@ template <typename Base, typename Derived> void castToDerived(std::unique_ptr<Ba
 }
 
 //-- codegen shit --//
-int numBlocks;
-int numReturns;
 bool isFunctionBlock = false;
 
 static LLVMContext TheContext;
@@ -764,18 +755,18 @@ public:
   virtual Value* codegen() override {
     // Look up the name in the global module table.
     Function* CalleeF = TheModule->getFunction(name);
+
     if (!CalleeF) {
+      throwCodegenError("Function " + name + " not declared");
     }
-    // ERROR
-    // If argument mismatch error.
+
     if (CalleeF->arg_size() != args.size()) {
+      throwCodegenError("Function " + name + " called with too many arguments. Got: " + to_string(args.size()) + ". Expected: " + to_string(CalleeF->arg_size()));
     }
-    // ERROR
+
     std::vector<Value*> ArgsV;
     for (unsigned i = 0, e = args.size(); i != e; ++i) {
       ArgsV.push_back(args[i]->codegen());
-      if (!ArgsV.back())
-        return nullptr;
     }
     return Builder.CreateCall(CalleeF, ArgsV, "calltmp");
   };
@@ -804,15 +795,18 @@ public:
   };
 
   virtual Value* codegen() override {
-    // get first table with this variable innit
-    // CHECK GLOBAL VARS
     for (int i = tables.size() - 1; i >= 0; i--) {
       if (tables[i].find(name) != tables[i].end()) {
+        // ERROR - check if variable has been given an allocated value and not just been declared
         return Builder.CreateLoad(tables[i][name]->getAllocatedType(), tables[i][name], name);
       }
-      // ERROR HANDLE - VARIABLE NOT DECLARED, OR NO VALUE STORED
     }
-    return nullptr;
+
+    if (globalTable.find(name) != globalTable.end()) {
+      return Builder.CreateLoad(globalTable[name]->getValueType(), globalTable[name], name);
+    }
+
+    throwCodegenError("Variable " + name + " has not been declared or assigned.");
   };
 
   virtual std::string to_string(int d) const override {
@@ -930,11 +924,10 @@ public:
 
     Value* widestTypeLeft = widenLtoR(leftVal, rightVal->getType());
     Value* widestTypeRight = widenLtoR(rightVal, leftVal->getType());
-
-    // ERROR - CHECK FOR DIVIDE BY ZERO IF INTEGERS
-    // CHECK FOR NAN IF FLOATS
-    // maybe just do the below
-    // ALSO CHECK FOR NAN IN VARIABLE ASSIGNMENTS AND RETURN STMTS AND CONDITIONS
+    // ERROR DIVIDE BY 0 INTEGER
+    //  CHECK FOR NAN IF FLOATS
+    //  maybe just do the below
+    //  ALSO CHECK FOR NAN IN VARIABLE ASSIGNMENTS AND RETURN STMTS AND CONDITIONS
     if (op == "*") {
       if (widestTypeLeft->getType()->isFloatTy()) {
         return Builder.CreateFMul(widestTypeLeft, widestTypeRight);
@@ -1025,6 +1018,7 @@ public:
     // if tables.size() is 0, then we are declaring a global variable
 
     // ERROR HANDLE - DONT ALLOW REDECLARATION OF SAME VARIABLE IN SAME SCOPE
+    // DO NOT ALLOW DECLERATION OF VARIABLE
     if (tables.size() == 0) {
       GlobalVariable* gvar = new GlobalVariable(*(TheModule.get()), typePtr, false, GlobalValue::CommonLinkage, nullptr);
       gvar->setAlignment(MaybeAlign(4));
@@ -1077,22 +1071,21 @@ public:
   virtual Value* codegen() override {
     Value* expressionVal = expression->codegen();
     Value* valAssigned;
-    // get first table with this variable innit
-    // ERROR HANDLE - VARIABLE MUST BE DECLARED FIRST
-    if (tables.size() == 0) {
-      valAssigned = Builder.CreateStore(expressionVal, globalTable[name]);
-    } else {
-      for (int i = tables.size() - 1; i >= 0; i--) {
-        if (tables[i].find(name) != tables[i].end()) {
-          // need to widen/narrow as required
-          Value* widestType = widenLtoR(expressionVal, tables[i][name]->getAllocatedType());
-          Value* narrowedType = narrowLtoR(widestType, tables[i][name]->getAllocatedType());
-          valAssigned = Builder.CreateStore(narrowedType, tables[i][name]);
-        }
+
+    for (int i = tables.size() - 1; i >= 0; i--) {
+      if (tables[i].find(name) != tables[i].end()) {
+        // need to widen/narrow as required
+        Value* widestType = widenLtoR(expressionVal, tables[i][name]->getAllocatedType());
+        Value* narrowedType = narrowLtoR(widestType, tables[i][name]->getAllocatedType());
+        return Builder.CreateStore(narrowedType, tables[i][name]);
       }
     }
 
-    return valAssigned;
+    if (globalTable.find(name) != globalTable.end()) {
+      return Builder.CreateStore(expressionVal, globalTable[name]);
+    }
+
+    throwCodegenError("Variable " + name + " has not been declared.");
   };
 
   virtual std::string to_string(int d) const override {
@@ -1187,25 +1180,26 @@ public:
     // push new symbol table for this block if we arent in an immediate function block
     if (!isFunctionBlock) {
       tables.push_back(SymbolTable());
+      std::cout << "    tables size: " + std::to_string(tables.size()) << std::endl;
     }
+    isFunctionBlock = false;
 
     for (auto& local : localDecls) {
       local->codegen();
     }
 
-    isFunctionBlock = false;
-
     for (auto& stmt : stmts) {
       if (dynamic_cast<ReturnAST*>(stmt.get())) {
         // found return stmt
         returnVal = stmt->codegen();
-        numReturns++;
         // stop any other codegen (stmts should be in order)
         break;
       } else {
         stmt->codegen();
       }
     }
+        printTables(tables);
+
 
     // pop the symbol table - we are done codegening everything inside this block, ie. we are now leaving the scope
     tables.pop_back();
@@ -1263,7 +1257,6 @@ public:
 
     Builder.SetInsertPoint(ifBlock);
     body->codegen();
-    numBlocks++;
     Builder.CreateBr(end);
 
     // TODO
@@ -1272,7 +1265,6 @@ public:
       Builder.SetInsertPoint(elseBlock);
 
       elseBody->codegen();
-      numBlocks++;
       Builder.CreateBr(end);
     }
 
@@ -1328,7 +1320,6 @@ public:
     Builder.SetInsertPoint(whileBlock);
 
     stmt->codegen();
-    numBlocks++;
 
     Builder.CreateBr(condBlock);
 
@@ -1414,9 +1405,6 @@ public:
 
   virtual Value* codegen() override {
     // set num blocks and num returns to 0 again, new function
-    numBlocks = 0;
-    numReturns = 0;
-
     Function* TheFunction = TheModule->getFunction(prototype->name);
     if (!TheFunction)
       TheFunction = (Function*)prototype->codegen();
@@ -1448,16 +1436,8 @@ public:
       // we are always allowed to pad the function if its void
       if (TheFunction->getReturnType()->isVoidTy()) {
         Builder.CreateRetVoid();
-      }
-
-      else if (numReturns == 0) {
-        // if we have 0 returns, and its not void, error
-        // ERROR
-      } else if (numBlocks == numReturns) {
-        // if we have returns in every control flow, then we can pad out the final block with a dummy return instruction
-        // this is technically stricter than it needs to be (should be every _reachable_ control flow)
-        Builder.CreateRetVoid();
       } else {
+        // if we have 0 returns, and its not void, error
         // ERROR
       }
     }
@@ -1619,7 +1599,7 @@ nonTerminalInfo nonterminal(const std::string& name) {
             result[symbol] = functionMap[symbol]();
           } else {
             // symbol was a terminal but didnt match CurTok
-            throwError({symbol}, CurTok.lexeme);
+            throwParserError({symbol}, CurTok.lexeme);
           }
         }
       }
@@ -1633,12 +1613,13 @@ nonTerminalInfo nonterminal(const std::string& name) {
       // see if we should use an available epsilon production
       //'using' the production just entails returning an empty result map for this nonterminal
       if (!(!epsilonRule.empty() && (followSets[name].find(CurTok.lexeme) != followSets[name].end() || followSets[name].find(typeLiteralString) != followSets[name].end()))) {
-        throwError(expected, CurTok.lexeme);
+        throwParserError(expected, CurTok.lexeme);
       } else {
       }
     }
   } else {
-    throwError({}, CurTok.lexeme, "Production not found for " + name);
+    std::cout << "Production not found for " + name << std::endl;
+    exit(1);
   }
 
   return result;
@@ -2254,24 +2235,8 @@ int main(int argc, char** argv) {
 
   fprintf(stderr, "Parsing Finished\n");
 
-  /*   std::string filepath = "stringrep.xml";
-
-    // Create an ofstream instance to write to the file
-    std::ofstream fileStream(filepath);
-
-    // Check if the file stream is open
-    if (fileStream.is_open()) {
-      // Write the JSON string to the file
-      fileStream << xmlString;
-      // Close the file stream
-      fileStream.close();
-      std::cout << "XML written to " << filepath << std::endl;
-    } else {
-      std::cerr << "Unable to open file for writing." << std::endl;
-      return 1;
-    } */
   std::unique_ptr<ASTNode> programNode = std::move(parser());
-  // llvm::outs() << *programNode << "\n";
+  llvm::outs() << *programNode << "\n";
   //********************* Start printing final IR **************************
   //  Print out all of the generated code into a file called output.ll
   auto Filename = "output.ll";
