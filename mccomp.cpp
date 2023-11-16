@@ -499,6 +499,18 @@ Type* stringToPtrType(std::string type) {
   return Type::getVoidTy(TheContext);
 }
 
+std::string ptrToStringType(Type* type) {
+  if (type->getTypeID() == Type::getInt1Ty(TheContext)->getTypeID()) {
+    return "bool";
+  } else if (type->getTypeID() == Type::getInt32Ty(TheContext)->getTypeID()) {
+    return "int";
+  } else if (type->getTypeID() == Type::getFloatTy(TheContext)->getTypeID()) {
+    return "float";
+  }
+
+  return "void";
+}
+
 // Assign ranks to types: float > 32 bit int > 1 bit int
 int getTypeRank(Type* type) {
   if (type->isFloatTy())
@@ -767,9 +779,24 @@ public:
     }
 
     std::vector<Value*> ArgsV;
-    for (unsigned i = 0, e = args.size(); i != e; ++i) {
-      ArgsV.push_back(args[i]->codegen());
+
+    // allow type widening, disallow type narrowing
+    int i = 0;
+    for (auto& Arg : CalleeF->args()) {
+      Value* argCode = args[i]->codegen();
+
+      if (compareTypes(Arg.getType(), argCode->getType())) {
+        // if the parameter type is greater than or equal to the arg we codegen, then we can widen
+        ArgsV.push_back(widenLtoR(argCode, Arg.getType()));
+      } else {
+        throwCodegenError("Attempted to pass argument " + argCode->getName().str() + " of type " + ptrToStringType(argCode->getType()) + " to parameter of type " +
+                              ptrToStringType(Arg.getType()) + " when calling function " + name,
+                          token);
+      }
+
+      i++;
     }
+
     return Builder.CreateCall(CalleeF, ArgsV, "calltmp");
   };
 
@@ -799,7 +826,6 @@ public:
   virtual Value* codegen() override {
     for (int i = tables.size() - 1; i >= 0; i--) {
       if (tables[i].find(name) != tables[i].end()) {
-        // ERROR - check if variable has been given an allocated value and not just been declared
         return Builder.CreateLoad(tables[i][name]->getAllocatedType(), tables[i][name], name);
       }
     }
@@ -854,70 +880,64 @@ public:
   BinOpAST(std::string op, ptrVec<ASTNode>&& right) : op(op) { this->right = std::move(right[0]); };
 
   virtual Value* codegen() override {
+    Function* TheFunction = Builder.GetInsertBlock()->getParent();
 
     if (op == "&&") {
-      Function* TheFunction = Builder.GetInsertBlock()->getParent();
-      BasicBlock* entry = BasicBlock::Create(TheContext, "entry", TheFunction);
-      BasicBlock* evalRight = BasicBlock::Create(TheContext, "evalRight", TheFunction);
-      BasicBlock* end = BasicBlock::Create(TheContext, "end", TheFunction);
-
-      //first add a branch to the entry point of this evaluation
-      Builder.CreateBr(entry);
-      // start by calculating the left value, narrowing to a boolean, and then creating the condition to see if we should evaluate right
-      Builder.SetInsertPoint(entry);
       Value* leftVal = this->left->codegen();
       Value* narrowedValueLeft = narrowLtoR(leftVal, Type::getInt1Ty(TheContext));
 
-      // Check if A is false
-      Value* condA = Builder.CreateICmpNE(narrowedValueLeft, Builder.getInt1(false));
+      BasicBlock* leftFalseBB = BasicBlock::Create(TheContext, "leftTrue", TheFunction);
+      BasicBlock* evalRightBB = BasicBlock::Create(TheContext, "evalRight", TheFunction);
+      BasicBlock* mergeBB = BasicBlock::Create(TheContext, "merge", TheFunction);
 
-      Builder.CreateCondBr(condA, evalRight, end); // If A is true, evaluate B, else go to end
+      Value* leftCond = Builder.CreateICmpNE(narrowedValueLeft, Builder.getInt1(false));
 
-      // Block to evaluate B
-      Builder.SetInsertPoint(evalRight);
+      Builder.CreateCondBr(leftCond, evalRightBB, leftFalseBB);
+
+      Builder.SetInsertPoint(leftFalseBB);
+      Builder.CreateBr(mergeBB);
+
+      Builder.SetInsertPoint(evalRightBB);
       Value* rightVal = this->right->codegen();
       Value* narrowedValueRight = narrowLtoR(rightVal, Type::getInt1Ty(TheContext));
 
-      Builder.CreateBr(end);
+      Builder.SetInsertPoint(evalRightBB);
+      Builder.CreateBr(mergeBB);
 
-      // End block, combine results
-      Builder.SetInsertPoint(end);
+      Builder.SetInsertPoint(mergeBB);
       PHINode* phi = Builder.CreatePHI(Builder.getInt1Ty(), 2);
-      phi->addIncoming(Builder.getInt1(false), entry); // A is false
-      phi->addIncoming(narrowedValueRight, evalRight); // Result of B
+      phi->addIncoming(Builder.getInt1(false), leftFalseBB);
+      phi->addIncoming(narrowedValueRight, evalRightBB);
 
-      return Builder.CreateAnd(narrowedValueLeft, phi);
+      return phi;
     } else if (op == "||") {
-      Function* TheFunction = Builder.GetInsertBlock()->getParent();
-      BasicBlock* entry = BasicBlock::Create(TheContext, "entry", TheFunction);
-      BasicBlock* evalRight = BasicBlock::Create(TheContext, "evalRight", TheFunction);
-      BasicBlock* end = BasicBlock::Create(TheContext, "end", TheFunction);
-
-      //first add a branch to the entry point of this evaluation
-      Builder.CreateBr(entry);
-
-      Builder.SetInsertPoint(entry);
       Value* leftVal = this->left->codegen();
       Value* narrowedValueLeft = narrowLtoR(leftVal, Type::getInt1Ty(TheContext));
 
-      // Check if A is false
-      Value* condA = Builder.CreateICmpNE(narrowedValueLeft, Builder.getInt1(true));
+      BasicBlock* leftTrueBB = BasicBlock::Create(TheContext, "leftTrue", TheFunction);
+      BasicBlock* evalRightBB = BasicBlock::Create(TheContext, "evalRight", TheFunction);
+      BasicBlock* mergeBB = BasicBlock::Create(TheContext, "merge", TheFunction);
 
-      Builder.CreateCondBr(condA, evalRight, end); // If A is false, evaluate B, else go to end
+      Value* leftCond = Builder.CreateICmpNE(narrowedValueLeft, Builder.getInt1(false));
 
-      // Block to evaluate B
-      Builder.SetInsertPoint(evalRight);
+      Builder.CreateCondBr(leftCond, leftTrueBB, evalRightBB);
+
+      Builder.SetInsertPoint(leftTrueBB);
+      Builder.CreateBr(mergeBB);
+
+      Builder.SetInsertPoint(evalRightBB);
       Value* rightVal = this->right->codegen();
       Value* narrowedValueRight = narrowLtoR(rightVal, Type::getInt1Ty(TheContext));
-      Builder.CreateBr(end);
 
-      // End block, combine results
-      Builder.SetInsertPoint(end);
+      Builder.SetInsertPoint(evalRightBB);
+      Builder.CreateBr(mergeBB);
+
+      Builder.SetInsertPoint(mergeBB);
       PHINode* phi = Builder.CreatePHI(Builder.getInt1Ty(), 2);
-      phi->addIncoming(Builder.getInt1(true), entry);  // A is true
-      phi->addIncoming(narrowedValueRight, evalRight); // Result of B
+      phi->addIncoming(Builder.getInt1(true), leftTrueBB);
+      phi->addIncoming(narrowedValueRight, evalRightBB);
 
-      return Builder.CreateOr(narrowedValueLeft, phi);
+      return phi;
     }
 
     Value* leftVal = this->left->codegen();
@@ -925,10 +945,7 @@ public:
 
     Value* widestValueLeft = widenLtoR(leftVal, rightVal->getType());
     Value* widestValueRight = widenLtoR(rightVal, leftVal->getType());
-    // ERROR DIVIDE BY 0 INTEGER
-    //  CHECK FOR NAN IF FLOATS
-    //  maybe just do the below
-    //  ALSO CHECK FOR NAN IN VARIABLE ASSIGNMENTS AND RETURN STMTS AND CONDITIONS
+
     if (op == "*") {
       if (widestValueLeft->getType()->isFloatTy()) {
         return Builder.CreateFMul(widestValueLeft, widestValueRight);
@@ -936,9 +953,6 @@ public:
       return Builder.CreateMul(widestValueLeft, widestValueRight);
     } else if (op == "/") {
       if (widestValueLeft->getType()->isFloatTy()) {
-
-        std::cout << "widestValueLeft type: " + widestValueRight->getType()->isFloatTy() << " " + widestValueRight->getType()->isIntegerTy(32) << std::endl;
-
         return Builder.CreateFDiv(widestValueLeft, widestValueRight);
       }
       return Builder.CreateSDiv(widestValueLeft, widestValueRight);
@@ -1015,9 +1029,6 @@ public:
 
     // get the last symbol table, push to that one (this is the nested block we are in)
     // if tables.size() is 0, then we are declaring a global variable
-
-    // ERROR HANDLE - DONT ALLOW REDECLARATION OF SAME VARIABLE IN SAME SCOPE
-    // DO NOT ALLOW DECLERATION OF VARIABLE
     if (tables.size() == 0) {
       GlobalVariable* gvar = new GlobalVariable(*(TheModule.get()), typePtr, false, GlobalValue::CommonLinkage, nullptr);
       gvar->setAlignment(MaybeAlign(4));
@@ -1025,10 +1036,15 @@ public:
       globalTable[name] = gvar;
       return gvar;
     } else {
+      // check we are not redeclaring the same variable in the same scope
+      if (tables[tables.size() - 1].find(name) != tables[tables.size() - 1].end()) {
+        throwCodegenError("Found re-declaration of variable " + name, token);
+      }
+
       typePtr->print(llvm::outs());
       AllocaInst* alloca = CreateEntryBlockAlloca(Builder.GetInsertBlock()->getParent(), name, typePtr);
-      alloca->setAlignment(Align(4));
-      Builder.CreateStore(getDefaultConst(Type::getInt32Ty(TheContext)), alloca);
+      // alloca->setAlignment(Align(4));
+      Builder.CreateStore(getDefaultConst(typePtr), alloca);
       tables[tables.size() - 1][name] = alloca;
       return alloca;
     }
@@ -1131,7 +1147,6 @@ public:
 
   virtual Value* codegen() override {
     // create return instruction, widen if needed
-    // ERROR - IF YOU NEED TO NARROW
     Function* TheFunction = Builder.GetInsertBlock()->getParent();
 
     // if void return
@@ -1147,7 +1162,7 @@ public:
         return RetVal;
 
       } else {
-        // ERROR
+        throwCodegenError("Function of type " + ptrToStringType(TheFunction->getReturnType()) + " tries to return value of type " + ptrToStringType(RetVal->getType()), token);
       }
     }
   };
@@ -1191,7 +1206,7 @@ public:
     for (auto& stmt : stmts) {
       if (dynamic_cast<ReturnAST*>(stmt.get())) {
         // found return stmt
-        returnVal = stmt->codegen();
+        stmt->codegen();
         // stop any other codegen (stmts should be in order)
         break;
       } else {
@@ -1340,6 +1355,7 @@ public:
   };
 };
 
+// ERROR - CHECK FOR DUPLICATE PARAMS
 class ExternAST : public ASTNode {
 
 public:
@@ -1428,15 +1444,13 @@ public:
     // codegen the body
     block->codegen();
 
-    // every block will either branch or return apart from this last one POTENTIALLY (if there is nothing after an if/while statement end block) so check verify function
-    // verifyFunction will return true if the final block is empty
-    if (verifyFunction(*TheFunction)) {
+    // every block will either branch or return apart from this last one POTENTIALLY (if there is nothing after an if/while statement end block)
+    if (Builder.GetInsertBlock()->empty()) {
       // we are always allowed to pad the function if its void
       if (TheFunction->getReturnType()->isVoidTy()) {
         Builder.CreateRetVoid();
       } else {
-        // if we have 0 returns, and its not void, error
-        // ERROR
+        throwCodegenError("Missing return for function " + TheFunction->getName().str() + " of type " + ptrToStringType(TheFunction->getReturnType()), token);
       }
     }
 
