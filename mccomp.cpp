@@ -358,7 +358,6 @@ static TOKEN gettok() {
   }
 
   // Otherwise, just return the character as its ascii value.
-  // add error handling?
   int ThisChar = LastChar;
   std::string s(1, ThisChar);
   LastChar = getc(pFile);
@@ -454,7 +453,10 @@ template <typename Base, typename Derived> void castToDerived(std::unique_ptr<Ba
 }
 
 //-- codegen shit --//
+// so we add a new symbol table only if this is not an immediate function block
 bool isFunctionBlock = false;
+// so we dont add branch instructions after a return statement in a while/if
+bool hasCreatedReturn = false;
 
 static LLVMContext TheContext;
 static IRBuilder<> Builder(TheContext);
@@ -500,11 +502,11 @@ Type* stringToPtrType(std::string type) {
 }
 
 std::string ptrToStringType(Type* type) {
-  if (type->getTypeID() == Type::getInt1Ty(TheContext)->getTypeID()) {
+  if (type == Type::getInt1Ty(TheContext)) {
     return "bool";
-  } else if (type->getTypeID() == Type::getInt32Ty(TheContext)->getTypeID()) {
+  } else if (type == Type::getInt32Ty(TheContext)) {
     return "int";
-  } else if (type->getTypeID() == Type::getFloatTy(TheContext)->getTypeID()) {
+  } else if (type == Type::getFloatTy(TheContext)) {
     return "float";
   }
 
@@ -574,10 +576,8 @@ Value* widenLtoR(Value* leftVal, Type* rightType) {
     IntegerType* intRight = cast<IntegerType>(rightType);
     unsigned widthRight = intRight->getIntegerBitWidth();
 
-    Type* int32type = Type::getInt32Ty(TheContext);
-
     if (widthRight > widthLeft) {
-      Value* newVal = Builder.CreateSExt(leftVal, int32type);
+      Value* newVal = Builder.CreateZExt(leftVal, Type::getInt32Ty(TheContext));
       return newVal;
     }
 
@@ -597,7 +597,7 @@ Value* narrowLtoR(Value* leftVal, Type* rightType) {
   } else {
     Value* newVal;
     if (leftType->isFloatTy()) {
-      newVal = Builder.CreateFPToSI(leftVal, Type::getFloatTy(TheContext));
+      newVal = Builder.CreateFPToSI(leftVal, Type::getInt32Ty(TheContext));
     } else {
       newVal = leftVal;
     }
@@ -610,18 +610,16 @@ Value* narrowLtoR(Value* leftVal, Type* rightType) {
     IntegerType* intRight = cast<IntegerType>(rightType);
     unsigned widthRight = intRight->getIntegerBitWidth();
 
-    Type* int1type = Type::getInt1Ty(TheContext);
-
     if (widthLeft > widthRight) {
-      Value* newNewVal = Builder.CreateTrunc(newVal, int1type);
-      return newNewVal;
+      //if new val is not equal to 0, then we want 1. otherwise we want 0. perfect.
+      Value* boolVal = Builder.CreateICmpNE(newVal, getDefaultConst(Type::getInt32Ty(TheContext)));
+      return boolVal;
     }
     return newVal;
   }
 }
 
 Value* trueValue = ConstantInt::get(Type::getInt1Ty(TheContext), 1, false);
-Value* zeroValue = ConstantInt::get(Type::getInt32Ty(TheContext), 0, true);
 
 //-- codegen shit --//
 
@@ -645,8 +643,7 @@ public:
 
   virtual Value* codegen() override {
     Value* childVal = child->codegen();
-    // double check with finnbarrrrrr
-    //  if integer/float, and we have a !, cast to bool (i think check with jaden)
+    //  if integer/float, and we have a !, cast to bool
     if (symbol == "!") {
       // first make sure we cast to bool if needed
       Value* narrowedValue = narrowLtoR(childVal, Type::getInt1Ty(TheContext));
@@ -658,7 +655,7 @@ public:
       if (widestValue->getType()->isFloatTy()) {
         return Builder.CreateFNeg(widestValue);
       }
-      return Builder.CreateSub(zeroValue, widestValue);
+      return Builder.CreateSub(getDefaultConst(Type::getInt32Ty(TheContext)), widestValue);
     }
 
     return nullptr;
@@ -789,8 +786,8 @@ public:
         // if the parameter type is greater than or equal to the arg we codegen, then we can widen
         ArgsV.push_back(widenLtoR(argCode, Arg.getType()));
       } else {
-        throwCodegenError("Attempted to pass argument " + argCode->getName().str() + " of type " + ptrToStringType(argCode->getType()) + " to parameter of type " +
-                              ptrToStringType(Arg.getType()) + " when calling function " + name,
+        throwCodegenError("Attempted to pass argument of type " + ptrToStringType(argCode->getType()) + " to parameter of type " + ptrToStringType(Arg.getType()) +
+                              " when calling function " + name,
                           token);
       }
 
@@ -1087,7 +1084,6 @@ public:
 
   virtual Value* codegen() override {
     Value* expressionVal = expression->codegen();
-    Value* valAssigned;
 
     for (int i = tables.size() - 1; i >= 0; i--) {
       if (tables[i].find(name) != tables[i].end()) {
@@ -1207,6 +1203,7 @@ public:
       if (dynamic_cast<ReturnAST*>(stmt.get())) {
         // found return stmt
         stmt->codegen();
+        hasCreatedReturn = true;
         // stop any other codegen (stmts should be in order)
         break;
       } else {
@@ -1270,19 +1267,27 @@ public:
 
     Builder.SetInsertPoint(ifBlock);
     body->codegen();
-    Builder.CreateBr(end);
 
-    // TODO
+    if (!hasCreatedReturn) {
+      // dont add branch statement otherwise
+      Builder.CreateBr(end);
+    } else {
+      hasCreatedReturn = false;
+    }
+
     if (elseBody) {
-      // elseBlock->insertInto(TheFunction);
       Builder.SetInsertPoint(elseBlock);
 
       elseBody->codegen();
-      Builder.CreateBr(end);
+
+      if (!hasCreatedReturn) {
+        // dont add branch statement otherwise
+        Builder.CreateBr(end);
+      } else {
+        hasCreatedReturn = false;
+      }
     }
 
-    // TODO
-    // end->insertInto(TheFunction);
     Builder.SetInsertPoint(end);
 
     return nullptr;
@@ -1328,16 +1333,19 @@ public:
 
     Builder.CreateCondBr(comp, whileBlock, end);
 
-    // TODO
-    // whileBlock->insertInto(TheFunction);
     Builder.SetInsertPoint(whileBlock);
 
     stmt->codegen();
 
-    Builder.CreateBr(condBlock);
 
-    // TODO
-    // end->insertInto(TheFunction);
+    if (!hasCreatedReturn) {
+      // dont add branch statement otherwise
+      Builder.CreateBr(condBlock);
+    }
+    else{
+      hasCreatedReturn = false;
+    }
+
     Builder.SetInsertPoint(end);
 
     return nullptr;
@@ -1355,7 +1363,6 @@ public:
   };
 };
 
-// ERROR - CHECK FOR DUPLICATE PARAMS
 class ExternAST : public ASTNode {
 
 public:
@@ -1385,9 +1392,16 @@ public:
     FunctionType* FT = FunctionType::get(stringToPtrType(type), types, false);
     Function* F = Function::Create(FT, Function::ExternalLinkage, name, TheModule.get());
     // Set names for all arguments.
-    unsigned Idx = 0;
-    for (auto& Arg : F->args())
-      Arg.setName(params[Idx++]->name);
+    unsigned i = 0;
+    std::unordered_set<std::string> seen;
+    for (auto& Arg : F->args()) {
+      if (seen.find(params[i]->name) != seen.end()) {
+        throwCodegenError("Found duplicate parameter name " + params[i]->name + " in function " + name, token);
+      }
+      seen.insert(params[i]->name);
+      Arg.setName(params[i]->name);
+      i++;
+    }
 
     return F;
   };
@@ -1460,7 +1474,7 @@ public:
   virtual std::string to_string(int d) const override {
     std::string str = "";
     addIndents(d, str);
-    str += "<FuncDecl type='" + type + "' name='" + name + "'>\n";
+    str += "<FuncDecl>\n";
 
     str += prototype->to_string(d + 1);
 
@@ -1936,6 +1950,7 @@ ptrVec<ASTNode> else_stmt() {
 
   return std::move(info["block"]);
 }
+
 ptrVec<ASTNode> return_stmt() {
   nonTerminalInfo info = nonterminal("return_stmt");
   return std::move(info["return_stmt'"]);
@@ -2090,6 +2105,8 @@ ptrVec<ASTNode> primary() {
     if (info["primary'"].size() == 0) {
       res.push_back(std::make_unique<VarCallAST>(std::move(ident)));
     } else {
+      // pop the last element ')' and move remaniing arguments
+      info["primary'"].pop_back();
       res.push_back(std::make_unique<FuncCallAST>(std::move(ident), std::move(info["primary'"])));
     }
   } else if (info.find("INT_LIT") != info.end()) {
@@ -2112,7 +2129,12 @@ ptrVec<ASTNode> primary_prime() {
     return ptrVec<ASTNode>{};
   }
 
-  return std::move(info["args"]);
+  ptrVec<ASTNode> res;
+  // primary prime can actually be empty OR just have no arguments - big difference
+  // add the terminal ')' so we can signify a lack of arguments instead of just nothing if no args are present
+  res = std::move(info["args"]);
+  res.push_back(std::move(info[")"][0]));
+  return res;
 }
 
 ptrVec<ASTNode> args() {
