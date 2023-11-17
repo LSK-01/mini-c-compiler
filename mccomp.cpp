@@ -403,7 +403,7 @@ static TOKEN peekNext() {
 }
 
 static void throwParserError(const std::unordered_set<std::string>& expected, std::string found) {
-  std::cout << "Encountered an error on line " + std::to_string(lineNo) + " column " + std::to_string(columnNo) + ".\n";
+  std::cout << "\nEncountered an error on line " + std::to_string(lineNo) + " column " + std::to_string(columnNo) + ".\n";
   std::cout << "Expected one of: ";
   for (const auto& element : expected) {
     std::cout << element << ' ';
@@ -413,7 +413,7 @@ static void throwParserError(const std::unordered_set<std::string>& expected, st
 }
 
 static void throwCodegenError(std::string message, TOKEN token) {
-  std::cout << "Encountered an error during compilation: " << message << "\n" << std::endl;
+  std::cout << "\nEncountered an error during IR generation: " << message << "\n" << std::endl;
   std::cout << "Lexeme: " + token.lexeme + "\nOn line: " + std::to_string(token.lineNo) + " column: " + std::to_string(token.columnNo) << std::endl;
   exit(1);
 }
@@ -452,7 +452,7 @@ template <typename Base, typename Derived> void castToDerived(std::unique_ptr<Ba
   target.reset(derivedPtr);
 }
 
-//-- codegen shit --//
+//-- codegen --//
 // so we add a new symbol table only if this is not an immediate function block
 bool isFunctionBlock = false;
 // so we dont add branch instructions after a return statement in a while/if
@@ -554,24 +554,32 @@ static AllocaInst* CreateEntryBlockAlloca(Function* TheFunction, const std::stri
 // widens left to right
 // returns the widest type out of both values
 Value* widenLtoR(Value* leftVal, Type* rightType) {
-
+  Value* newVal;
   Type* leftType = leftVal->getType();
   // widen as much as needed first
-  // bool = int = 13 < int = 13 < float = 2
-
   if (leftType->isFloatTy()) {
     // no widening to be done
     return leftVal;
   }
 
+  IntegerType* intLeft = cast<IntegerType>(leftVal->getType());
+  unsigned widthLeft = intLeft->getIntegerBitWidth();
+
   if (rightType->isFloatTy()) {
-    Value* newVal = Builder.CreateSIToFP(leftVal, Type::getFloatTy(TheContext));
+    // if left is bool we need to extend first otherwise we get signed issue
+    Value* int32;
+    if (widthLeft == 1) {
+        int32 = Builder.CreateZExt(leftVal, Type::getInt32Ty(TheContext));
+    }
+    else{
+      int32 = leftVal;
+    }
+
+    newVal = Builder.CreateSIToFP(int32, Type::getFloatTy(TheContext));
     return newVal;
   } else {
     // check the bit width of the integers we are dealing with
     // if they are not the same, then we need to widen the smaller one
-    IntegerType* intLeft = cast<IntegerType>(leftVal->getType());
-    unsigned widthLeft = intLeft->getIntegerBitWidth();
 
     IntegerType* intRight = cast<IntegerType>(rightType);
     unsigned widthRight = intRight->getIntegerBitWidth();
@@ -611,7 +619,7 @@ Value* narrowLtoR(Value* leftVal, Type* rightType) {
     unsigned widthRight = intRight->getIntegerBitWidth();
 
     if (widthLeft > widthRight) {
-      //if new val is not equal to 0, then we want 1. otherwise we want 0. perfect.
+      // if new val is not equal to 0, then we want 1. otherwise we want 0. perfect.
       Value* boolVal = Builder.CreateICmpNE(newVal, getDefaultConst(Type::getInt32Ty(TheContext)));
       return boolVal;
     }
@@ -621,7 +629,7 @@ Value* narrowLtoR(Value* leftVal, Type* rightType) {
 
 Value* trueValue = ConstantInt::get(Type::getInt1Ty(TheContext), 1, false);
 
-//-- codegen shit --//
+//-- codegen --//
 
 /// ASTNode - Base class for all AST nodes.
 class ASTNode {
@@ -1206,7 +1214,6 @@ public:
         stmt->codegen();
       }
     }
-    printTables(tables);
     // pop the symbol table - we are done codegening everything inside this block, ie. we are now leaving the scope
     tables.pop_back();
 
@@ -1333,12 +1340,10 @@ public:
 
     stmt->codegen();
 
-
     if (!hasCreatedReturn) {
       // dont add branch statement otherwise
       Builder.CreateBr(condBlock);
-    }
-    else{
+    } else {
       hasCreatedReturn = false;
     }
 
@@ -1460,7 +1465,7 @@ public:
       if (TheFunction->getReturnType()->isVoidTy()) {
         Builder.CreateRetVoid();
       } else {
-        //im going to return a default value as this is intuitive for the user :)))))))))))
+        // im going to return a default value as this is intuitive for the user :)))))))))))
         Builder.CreateRet(getDefaultConst(TheFunction->getReturnType()));
       }
     }
@@ -1556,7 +1561,7 @@ std::unordered_map<int, std::string> typeToString = {
 //===----------------------------------------------------------------------===//
 
 /* Add function calls for each production */
-void printMap(const std::map<std::string, std::vector<std::unique_ptr<ASTNode>>>& myMap) {
+void printMap(const std::unordered_map<std::string, std::vector<std::unique_ptr<ASTNode>>>& myMap) {
   for (const auto& pair : myMap) {
     const auto& key = pair.first;
     const auto& nodeList = pair.second;
@@ -1565,7 +1570,7 @@ void printMap(const std::map<std::string, std::vector<std::unique_ptr<ASTNode>>>
   }
 }
 
-using nonTerminalInfo = std::map<std::string, std::vector<std::unique_ptr<ASTNode>>>;
+using nonTerminalInfo = std::unordered_map<std::string, std::vector<std::unique_ptr<ASTNode>>>;
 
 nonTerminalInfo nonterminal(const std::string& name) {
   bool foundMatch = false;
@@ -1582,7 +1587,7 @@ nonTerminalInfo nonterminal(const std::string& name) {
       std::string firstSymbol = rule[0];
       expected.insert(firstSets[firstSymbol].begin(), firstSets[firstSymbol].end());
 
-      // incase we need to use follow set n shit
+      // incase we need to use follow set
       // this is assuming theres only one epsilon rule to choose (which there should be, most stuff is LL(1))
       if (firstSets[firstSymbol].find("''") != firstSets[firstSymbol].end()) {
         epsilonRule = rule;
@@ -2251,11 +2256,11 @@ int main(int argc, char** argv) {
 
   readGrammar();
   computeFirst();
-  //printFirst();
+  // printFirst();
 
   computeFollow();
 
-   //printFollow();
+  // printFollow();
   initialiseFunctionMap();
 
   fprintf(stderr, "Lexer Finished\n");

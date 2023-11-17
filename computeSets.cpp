@@ -366,7 +366,6 @@ void readGrammar() {
       }
 
       productions[input].push_back(rhs);
-      std::cout << line << std::endl;
     }
   }
 }
