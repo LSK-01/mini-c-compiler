@@ -1090,12 +1090,14 @@ public:
         // need to widen/narrow as required
         Value* widestValue = widenLtoR(expressionVal, tables[i][name]->getAllocatedType());
         Value* narrowedValue = narrowLtoR(widestValue, tables[i][name]->getAllocatedType());
-        return Builder.CreateStore(narrowedValue, tables[i][name]);
+        Builder.CreateStore(narrowedValue, tables[i][name]);
+        return narrowedValue;
       }
     }
 
     if (globalTable.find(name) != globalTable.end()) {
-      return Builder.CreateStore(expressionVal, globalTable[name]);
+      Builder.CreateStore(expressionVal, globalTable[name]);
+      return expressionVal;
     }
 
     throwCodegenError("Variable " + name + " has not been declared.", token);
@@ -1464,7 +1466,8 @@ public:
       if (TheFunction->getReturnType()->isVoidTy()) {
         Builder.CreateRetVoid();
       } else {
-        throwCodegenError("Missing return for function " + TheFunction->getName().str() + " of type " + ptrToStringType(TheFunction->getReturnType()), token);
+        //im going to return a default value as this is intuitive for the user :)))))))))))
+        Builder.CreateRet(getDefaultConst(TheFunction->getReturnType()));
       }
     }
 
