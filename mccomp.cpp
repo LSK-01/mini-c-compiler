@@ -700,7 +700,6 @@ public:
   virtual Value* codegen() override { return ConstantInt::get(TheContext, APInt(32, Val, true)); };
   virtual std::string to_string(int d) const override {
     std::string str = "";
-    addIndents(d, str);
     str += "<Int val='" + std::to_string(Val) + "'/>\n";
     return str;
   };
@@ -721,7 +720,6 @@ public:
 
   virtual std::string to_string(int d) const override {
     std::string str = "";
-    addIndents(d, str);
     str += "<Float val='" + std::to_string(Val) + "'/>\n";
     return str;
   };
@@ -744,7 +742,6 @@ public:
   virtual Value* codegen() override { return ConstantInt::get(TheContext, APInt(1, Val, false)); };
   virtual std::string to_string(int d) const override {
     std::string str = "";
-    addIndents(d, str);
     str += "<Bool val='" + std::to_string(Val) + "'/>\n";
     return str;
   };
@@ -799,12 +796,10 @@ public:
 
   virtual std::string to_string(int d) const override {
     std::string str = "";
-    addIndents(d, str);
-    str += "<FuncCall name='" + name + "'>\n";
+    str += "<FuncCall name='" + name + "'>";
     for (auto& arg : args) {
       str += arg->to_string(d + 1);
     }
-    addIndents(d, str);
     str += "</FuncCall>\n";
     return str;
   };
@@ -836,7 +831,6 @@ public:
 
   virtual std::string to_string(int d) const override {
     std::string str = "";
-    addIndents(d, str);
     str += "<VarCall name='" + name + "' />\n";
     return str;
   };
@@ -1411,12 +1405,12 @@ public:
   virtual std::string to_string(int d) const override {
     std::string str = "";
     addIndents(d, str);
-    str += "<Extern type='" + type + "' name='" + name + "'>\n";
+    str += "<Prototype type='" + type + "' name='" + name + "'>\n";
     for (auto& param : params) {
       str += param->to_string(d + 1);
     }
     addIndents(d, str);
-    str += "</Extern>\n";
+    str += "</Prototype>\n";
     return str;
   };
 };
@@ -2257,12 +2251,11 @@ int main(int argc, char** argv) {
 
   readGrammar();
   computeFirst();
-  printFirst();
+  //printFirst();
 
   computeFollow();
 
-   printFollow();
-  return 0;
+   //printFollow();
   initialiseFunctionMap();
 
   fprintf(stderr, "Lexer Finished\n");
