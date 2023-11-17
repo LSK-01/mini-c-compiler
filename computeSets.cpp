@@ -1,7 +1,9 @@
 #include "computeSets.hpp"
+#include "grammarString.hpp"
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -338,16 +340,11 @@ std::string trim(const std::string& str) {
   return str.substr(start, end - start + 1);
 }
 
-void readGrammar(std::string filename) {
-  std::ifstream file(filename);
+void readGrammar() {
+  std::istringstream stream(grammar);
   std::string line;
 
-  if (!file.is_open()) {
-    std::cerr << "Failed to open the file.\n";
-    return;
-  }
-
-  while (std::getline(file, line)) {
+  while (std::getline(stream, line)) {
     if (line != "") {
       std::vector<std::string> parts = splitString(line, " ::= ");
 
@@ -358,12 +355,9 @@ void readGrammar(std::string filename) {
 
       std::vector<std::string> rhsParts = splitString(trim(parts[1]), " ");
       std::string input = trim(parts[0]);
-      // true if terminal
       std::vector<std::string> rhs;
 
       for (auto& part : rhsParts) {
-        // terminals are either epsilon, surrounded by quotes, or start with an
-        // uppercase character
         if (isTerminal(part)) {
           rhs.push_back(part);
         } else {
@@ -372,7 +366,7 @@ void readGrammar(std::string filename) {
       }
 
       productions[input].push_back(rhs);
+      std::cout << line << std::endl;
     }
   }
-  file.close();
 }

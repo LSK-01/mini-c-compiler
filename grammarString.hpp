@@ -1,0 +1,137 @@
+#include<string>
+
+std::string grammar = R"grammar(
+program ::= extern_list decl_list
+program ::= decl_list
+
+extern_list ::= extern extern_list'
+
+extern_list' ::= extern extern_list'
+extern_list' ::= ''
+
+extern ::= "extern" type_spec IDENT "(" params ")" ";"
+
+decl_list ::= decl decl_list'
+
+decl_list' ::= decl decl_list'
+decl_list' ::= ''
+
+decl ::= var_type IDENT decl'
+decl ::= "void" IDENT "(" params ")" block
+
+decl' ::= "(" params ")" block
+decl' ::= ";"
+
+type_spec ::= "void"
+type_spec ::= var_type
+
+var_type  ::= "int"
+var_type ::= "float"
+var_type ::= "bool"
+
+params ::= param_list
+params ::= "void"
+params ::= ''
+
+param_list ::= param param_list'
+
+param_list' ::= "," param param_list'
+param_list' ::= ''
+
+param ::= var_type IDENT
+
+block ::= "{" local_decls stmt_list "}"
+
+local_decls ::= local_decl local_decls
+local_decls ::= ''
+
+local_decl ::= var_type IDENT ";"
+
+stmt_list ::= stmt stmt_list'
+stmt_list ::= ''
+
+stmt_list' ::= stmt stmt_list'
+stmt_list' ::= ''
+
+stmt ::= expr_stmt
+stmt ::= block
+stmt ::= if_stmt
+stmt ::= while_stmt
+stmt ::= return_stmt
+
+expr_stmt ::= expr ";"
+expr_stmt ::= ";"
+
+while_stmt ::= "while" "(" expr ")" stmt
+
+if_stmt ::= "if" "(" expr ")" block else_stmt
+
+else_stmt ::= "else" block
+else_stmt ::= ''
+
+return_stmt ::= "return" return_stmt'
+
+return_stmt' ::= ";"
+return_stmt' ::= expr ";"
+
+expr ::= IDENT "=" expr
+expr ::= rval_or
+
+rval_or ::= and_exp rval_or'
+
+rval_or' ::= "||" and_exp rval_or'
+rval_or' ::= ''
+
+and_exp ::= equality_exp and_exp'
+
+and_exp' ::= "&&" equality_exp and_exp'
+and_exp' ::= ''
+
+equality_exp ::= relational_exp equality_exp'
+
+equality_exp' ::= "==" relational_exp equality_exp'
+equality_exp' ::= "!=" relational_exp equality_exp'
+equality_exp' ::= ''
+
+relational_exp ::= additive_exp relational_exp'
+
+relational_exp' ::= "<=" additive_exp relational_exp'
+relational_exp' ::= "<" additive_exp relational_exp'
+relational_exp' ::= ">=" additive_exp relational_exp'
+relational_exp' ::= ">" additive_exp relational_exp'
+relational_exp' ::= ''
+
+additive_exp ::= multiplicative_exp additive_exp'
+
+additive_exp' ::= "+" multiplicative_exp additive_exp'
+additive_exp' ::= "-" multiplicative_exp additive_exp'
+additive_exp' ::= ''
+
+multiplicative_exp ::= factor multiplicative_exp'
+
+multiplicative_exp' ::= "*" factor multiplicative_exp'
+multiplicative_exp' ::= "/" factor multiplicative_exp'
+multiplicative_exp' ::= "%" factor multiplicative_exp'
+multiplicative_exp' ::= ''
+
+factor ::= "-" factor
+factor ::= "!" factor
+factor ::= primary
+
+primary ::= "(" expr ")"
+primary ::= IDENT primary'
+primary ::= INT_LIT
+primary ::= FLOAT_LIT
+primary ::= BOOL_LIT
+
+primary' ::= "(" args ")"
+primary' ::= ''
+
+args ::= arg_list
+args ::= ''
+
+arg_list ::= expr arg_list'
+
+arg_list' ::= "," expr arg_list'
+arg_list' ::= ''
+)grammar";

@@ -1684,7 +1684,6 @@ ptrVec<ASTNode> extern_list() {
 // extern_list' ::= extern extern_list'
 // extern_list' ::= ''
 // if we don't need to return derived nodes just yet, then don't. More efficient. Otherwise we will be copying nodes
-// from vector to vector everytime we upcast and downcast. eugh.
 ptrVec<ASTNode> extern_list_prime() {
   nonTerminalInfo info = nonterminal("extern_list'");
   if (info.size() == 0) {
@@ -2256,15 +2255,14 @@ int main(int argc, char** argv) {
   lineNo = 1;
   columnNo = 1;
 
-  readGrammar("/Users/god/C++/cs325/code/grammar.txt");
-
+  readGrammar();
   computeFirst();
-  // printFirst();
+  printFirst();
 
   computeFollow();
 
-  // printFollow();
-
+   printFollow();
+  return 0;
   initialiseFunctionMap();
 
   fprintf(stderr, "Lexer Finished\n");
