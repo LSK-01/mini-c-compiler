@@ -1040,7 +1040,6 @@ public:
         throwCodegenError("Found re-declaration of variable " + name, token);
       }
 
-      typePtr->print(llvm::outs());
       AllocaInst* alloca = CreateEntryBlockAlloca(Builder.GetInsertBlock()->getParent(), name, typePtr);
       // alloca->setAlignment(Align(4));
       Builder.CreateStore(getDefaultConst(typePtr), alloca);
@@ -1460,7 +1459,7 @@ public:
     block->codegen();
 
     // every block will either branch or return apart from this last one POTENTIALLY (if there is nothing after an if/while statement end block)
-    if (Builder.GetInsertBlock()->empty()) {
+    if (verifyFunction(*TheFunction)) {
       // we are always allowed to pad the function if its void
       if (TheFunction->getReturnType()->isVoidTy()) {
         Builder.CreateRetVoid();
@@ -1468,6 +1467,11 @@ public:
         // im going to return a default value as this is intuitive for the user :)))))))))))
         Builder.CreateRet(getDefaultConst(TheFunction->getReturnType()));
       }
+    }
+
+    //if still not valid after 
+    if(verifyFunction(*TheFunction)){
+      throwCodegenError("IR is not valid.", token);
     }
 
     return TheFunction;
@@ -1554,7 +1558,6 @@ public:
 std::unordered_map<std::string, std::function<std::vector<std::unique_ptr<ASTNode>>()>> functionMap;
 std::unordered_map<int, std::string> typeToString = {
     {TOKEN_TYPE::IDENT, "IDENT"}, {TOKEN_TYPE::INT_LIT, "INT_LIT"}, {TOKEN_TYPE::FLOAT_LIT, "FLOAT_LIT"}, {TOKEN_TYPE::BOOL_LIT, "BOOL_LIT"}};
-/* add other AST nodes as nessasary */
 
 //===----------------------------------------------------------------------===//
 // Recursive Descent Parser - Function call for each production

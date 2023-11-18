@@ -76,14 +76,29 @@ Widening and narrowing were implemented using IRBuilder instructions \code{Creat
     \item Types are only widened when returned from functions
     \item Types are widened or narrowed during variable assignment
 \end{itemize}
+Given the inverse of a rule, a descriptive error is thrown if needed.
+\subsubsection*{Scope}
+\begin{lstlisting}[]
+using SymbolTable = std::unordered_map<std::string, AllocaInst*>;
+using GlobalTable = std::unordered_map<std::string, GlobalVariable*>;
+using Tables = std::vector<SymbolTable>;
+Tables tables;
+GlobalTable globalTable;
+\end{lstlisting}
+Using a vector of symbol tables for scope led to a fairly intuitive implementation - a new symbol table is pushed every time a new block is being code generated. A few tricks were required to completely make this approach work - for example, a global flag \code{isFunctionBlock}, so that we don't double push a symbol table when declaring a new function body.
+\subsubsection*{Ensuring valid IR}
+This involved:
+\begin{enumerate}
+    \item Ensuring each basic block is terminated (ends in either a \code{ret} or \code{br} statement). Almost every block will naturally either branch or return. The only block which may not do either is the last block in our function body. If no return statement is present in this block, \code{verifyFunction()} returns true, and we either:
+    \begin{enumerate}
+        \item Add a void return for a void function
+        \item Return a default value for a typed function
+    \end{enumerate}
+    This also results in a more intuitive experience for the end user.
 
-
-
-
-
-
-
-
+    \item That no other instructions follow a \code{ret}. This is handled by stopping codegen of a block's statement list when a node of type \code{ReturnAST} is encountered. For cases where there may be a return statement within an if/else/while block, \code{hasCreatedReturn} is used to check if a branch should avoid being added to these blocks.
+\end{enumerate}
+\subsubsection*{Lazy Boolean Evaluation}
 
 
 
