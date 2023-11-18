@@ -7,6 +7,12 @@
 \usepackage{listings}
 \usepackage{color}
 \usepackage{xcolor}
+\usepackage{adjustbox}
+\usepackage{enumitem}
+
+\setlist[enumerate]{itemsep=2pt, parsep=0pt}
+\setlist[itemize]{itemsep=2pt, parsep=0pt}
+
 \lstset{
     language=C++,                  % Set your language (you can change it as needed)
     basicstyle=\ttfamily\small,     % The basic style of your code
@@ -35,10 +41,10 @@
 \begin{document}
 \section*{Parser Design}
 My parser design is quite unique amongst others, and results in clean, concise, bug-free and resilient code. 
-\subsection*{Generating First and Follow sets programmatically}
+\subsubsection*{Generating First and Follow sets programmatically}
 I parse the grammar from a string form (\code{grammarString.hpp}), create a data structure to hold the productions for each nonterminal, and then compute the first and follow sets. The sets are then used to make the parser predictive - I converted the grammar to only require a lookahead of 1 (in almost every production), and so could use the sets to check the next production to take or whether to take an epsilon production.\\\\
 Doing this programmatically avoided the inevitable errors of manual computation and ensures correctness and robustness of the compiler.
-\subsection*{The \code{nonterminal} function}
+\subsubsection*{The \code{nonterminal} function}
 I abstracted out the basic framework for a production into a function \code{nonTerminalInfo nonterminal(const std::string& name)}, which takes the name of the production to parse, and returns a map of strings to vectors of \code{ASTNode}s, for each nonterminal (and terminal) on the production's RHS. A \code{functionMap} is maintained so that the corresponding production function for a given nonterminal can be called dynamically. This removes the common and confusing spaghetti code involving \code{getNextToken()} and \code{putBackToken()} that would otherwise be present, resulting in very short, readable production functions. In fact \code{putBackToken()} was never even needed (and has been removed). As an example, here is the function for the \code{param} production:
 \begin{lstlisting}[]
 ptrVec<ASTNode> param() {
@@ -51,7 +57,24 @@ ptrVec<ASTNode> param() {
 }
 \end{lstlisting}
 Everything is moved around as a general \code{ptrVec<ASTNode> = std::vector<std::unique_ptr<ASTNode>>} to facilitate this approach, until moved into an \code{ASTNode}s constructor, where nodes are cast and extracted as needed. Multiple overloaded templates, \code{castToDerived<Base, Derived>} were created to facilitate clean and easy casting of nodes.
-\subsection*{Error handling}
+\subsubsection*{ASTNodes}
+\begin{table}[htbp]
+    \centering
+    \begin{adjustbox}{center}
+    \begin{tabular}{|l|l|l|l|l|l|l|l|l|l|l|l|l|l|l|}
+    \hline
+    IntAST & FloatAST & BoolAST & FuncCallAST & VarCallAST & ProgramAST & NegationAST & StmtAST\\
+    \hline
+    DeclAST & BinOpAST & VarDeclAST & ParamAST & ExprStmtAST&FactorAST & StorageAST & PartialFuncDeclAST\\
+    \hline
+    IfAST & WhileAST & ExternAST & VarAssignAST & ReturnAST & BlockAST & FuncDeclAST & ExprAST\\
+    \hline
+    \end{tabular}
+\end{adjustbox}
+\end{table}
+\noindent Generally, I found mirroring the structure of the grammar in my \code{ASTNode}s to be clearest. As a result, and in the service of polymorphism, there are some \code{ASTNode}s like \code{StmtAST}, \code{DeclAST}, and \code{ExprAST} for other nodes to derive from.
+\code{StorageAST} was used to store terminal values in my implementation, including things like the value of \code{IDENT}.
+\subsubsection*{Error handling}
 Yet another benefit of my abstracted \code{nonterminal} function was that it allowed for a sublime way of implementing comprehensive error handling for the parser. I build up a \code{expected} set of terminals (using the first sets) as I check for productions to use - if no production can be found matching the current token, I pass this expected set to \code{throwParserError(const std::unordered_set<std::string>& expected, std::string found)}, which prints a comprehensive error:
 \begin{lstlisting}[]
 Encountered an error on line 2 column 23.
@@ -62,47 +85,54 @@ and then exits the program.\\
 Similarly,
 \code{throwCodegenError} makes use of tokens stored with each \code{ASTNode} to print the exact line, column and lexeme where an error occurred.
 \section*{IR Generation}
+Use of Finnbar Keating's lecture slides and the Kaleidescope tutorial were used to help find the right Build instructions and methods for some specific generations like function declarations. Beyond this, using BasicBlocks, setting insert points, and creating relevant instructions was a fairly intuitive process.
 \subsubsection*{Casting and Type Checking}
 Following the spirit of delightful code, multiple helper functions were created to make this area clean and robust. 
 \begin{itemize}
     \item \code{stringToPtrType} and \code{ptrToStringType} to convert between \code{std::string} and \code{Type*} representations of types
-    \item \code{Value* widenLtoR(Value* leftVal, Type* rightType)} which widens leftVal to rightType and returns the new corresponding \code{Value*}
+    \item \code{Value* widenLtoR(Value* leftVal, Type* rightType)} which widens \code{leftVal} to \code{rightType} and returns the new corresponding \code{Value*}
     \item Dually, \code{Value* narrowLtoR(Value* leftVal, Type* rightType)}
 \end{itemize}
 Widening and narrowing were implemented using IRBuilder instructions \code{CreateSIToFP}, \code{CreateZExt}, \code{CreateFPToSI}, and \code{CreateICmpNE}. Following the coursework guide, as well as the C99 specification, the following are the rules that I created for type checking and casting:
 \begin{itemize}
     \item Types are widened as much as needed during arithmetic and logical operations
-    \item Types are only widened when passed into functions
-    \item Types are only widened when returned from functions
+    \item Types are only to be widened when passed into functions
+    \item Types are only to be widened when returned from functions
     \item Types are widened or narrowed during variable assignment
 \end{itemize}
 Given the inverse of a rule, a descriptive error is thrown if needed.
 \subsubsection*{Scope}
-\begin{lstlisting}[]
-using SymbolTable = std::unordered_map<std::string, AllocaInst*>;
-using GlobalTable = std::unordered_map<std::string, GlobalVariable*>;
-using Tables = std::vector<SymbolTable>;
-Tables tables;
-GlobalTable globalTable;
-\end{lstlisting}
 Using a vector of symbol tables for scope led to a fairly intuitive implementation - a new symbol table is pushed every time a new block is being code generated. A few tricks were required to completely make this approach work - for example, a global flag \code{isFunctionBlock}, so that we don't double push a symbol table when declaring a new function body.
 \subsubsection*{Ensuring valid IR}
-This involved:
+This involved ensuring:
 \begin{enumerate}
-    \item Ensuring each basic block is terminated (ends in either a \code{ret} or \code{br} statement). Almost every block will naturally either branch or return. The only block which may not do either is the last block in our function body. If no return statement is present in this block, \code{verifyFunction()} returns true, and we either:
+    \item each basic block is terminated (ends in either a \code{ret} or \code{br} statement). Almost every block will naturally terminate. The only block which may not is the last block in our function body. If no return statement is present in this block, \code{verifyFunction()} returns true, and we either:
     \begin{enumerate}
         \item Add a void return for a void function
         \item Return a default value for a typed function
     \end{enumerate}
     This also results in a more intuitive experience for the end user.
 
-    \item That no other instructions follow a \code{ret}. This is handled by stopping codegen of a block's statement list when a node of type \code{ReturnAST} is encountered. For cases where there may be a return statement within an if/else/while block, \code{hasCreatedReturn} is used to check if a branch should avoid being added to these blocks.
+    \item that no other instructions follow a \code{ret}. This is handled by stopping codegen of a block's statement list when a node of type \code{ReturnAST} is encountered. For cases where there may be a return statement within an if/else/while block, \code{hasCreatedReturn} is used to check if a branch should avoid being added to these blocks.
+    \item that whenever loading from an alloca, there is a value stored in it. To solve this, I simply initialise all variables with a default value at first. This seemed a better, more intuitive solution to me than just allowing undefined behaviour as in the C99 standard.
 \end{enumerate}
 \subsubsection*{Lazy Boolean Evaluation}
+My implementation of lazy evaluation is recursive and intuitive, leading to a robust and clean solution which is inductively correct. Here are the steps taken to implement lazy evaluation for the \code{&&} operator. \code{||} implementation is similar and so is omitted.
+\begin{enumerate}
+    \item Code generate the left node of the expression, and narrow the Value* returned to a boolean \code{Int1}.
+    \item Create 3 Basic Blocks, leftFalseBB, evalRightBB, mergeBB.
+    \item If the left value was false, we branch to leftFalseBB, otherwise we branch to evalRightBB.
+    \item In leftFalseBB we simply branch to mergeBB immediately.
+    \item in evalRightBB, we evaluate the right node, narrow the value, and then branch to mergeBB (remembering to reset the insert point which may have moved during right node evaluation).
+    \item In mergeBB, we create a Phi node - if we come from predecessor leftFalseBB, then phi takes on the value \code{false}, otherwise coming from evalRightBB it takes the value of the right node.
+    \item We simply return the phi value.
+\end{enumerate}
+So, as required, we only evaluate the right node if the left node returns true. Otherwise, we can short circuit the evaluation, and just return false.
 
+\newpage
 
-
-
+\bibliographystyle{IEEEtran}
+\bibliography{report}
 
 \newpage
 \section*{Final Grammar}

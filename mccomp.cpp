@@ -1323,15 +1323,12 @@ public:
     BasicBlock* condBlock = BasicBlock::Create(TheContext, "condition", TheFunction);
     BasicBlock* whileBlock = BasicBlock::Create(TheContext, "while", TheFunction);
     BasicBlock* end = BasicBlock::Create(TheContext, "end", TheFunction);
-
-    Value* cond = expression->codegen();
-    Value* comp = Builder.CreateICmpNE(cond, Builder.getInt1(false));
-
+    
     Builder.CreateBr(condBlock);
 
     Builder.SetInsertPoint(condBlock);
-    cond = expression->codegen();
-    comp = Builder.CreateICmpNE(cond, Builder.getInt1(false));
+    Value* cond = expression->codegen();
+    Value* comp = Builder.CreateICmpNE(cond, Builder.getInt1(false));
 
     Builder.CreateCondBr(comp, whileBlock, end);
 
