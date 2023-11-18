@@ -9,6 +9,8 @@
 \usepackage{xcolor}
 \usepackage{adjustbox}
 \usepackage{enumitem}
+\usepackage{hyperref}
+\renewcommand{\refname}{Other Sources}
 
 \setlist[enumerate]{itemsep=2pt, parsep=0pt}
 \setlist[itemize]{itemsep=2pt, parsep=0pt}
@@ -72,8 +74,8 @@ Everything is moved around as a general \code{ptrVec<ASTNode> = std::vector<std:
     \end{tabular}
 \end{adjustbox}
 \end{table}
-\noindent Generally, I found mirroring the structure of the grammar in my \code{ASTNode}s to be clearest. As a result, and in the service of polymorphism, there are some \code{ASTNode}s like \code{StmtAST}, \code{DeclAST}, and \code{ExprAST} for other nodes to derive from.
-\code{StorageAST} was used to store terminal values in my implementation, including things like the value of \code{IDENT}.
+\noindent Generally, I found directly mirroring the structure of the grammar in my \code{ASTNode}s to be clearest. As a result, and in the service of polymorphism, there are general \code{ASTNode}s like \code{StmtAST}, \code{DeclAST}, and \code{ExprAST} for other nodes to derive from.
+\code{StorageAST} was used to store and access terminal values in my implementation, including things like the value of \code{IDENT}. \code{PartialFuncDeclAST} was needed in service of converting the \code{decl} production to only require a lookahead of 1. A \code{decl'} production was added which produces only the \code{params} and \code{block} of the function.
 \subsubsection*{Error handling}
 Yet another benefit of my abstracted \code{nonterminal} function was that it allowed for a sublime way of implementing comprehensive error handling for the parser. I build up a \code{expected} set of terminals (using the first sets) as I check for productions to use - if no production can be found matching the current token, I pass this expected set to \code{throwParserError(const std::unordered_set<std::string>& expected, std::string found)}, which prints a comprehensive error:
 \begin{lstlisting}[]
@@ -128,10 +130,12 @@ My implementation of lazy evaluation is recursive and intuitive, leading to a ro
     \item We simply return the phi value.
 \end{enumerate}
 So, as required, we only evaluate the right node if the left node returns true. Otherwise, we can short circuit the evaluation, and just return false.
-
+\subsubsection*{Known limitations}
+There are no known limitations of the solution with regards to compiling the Mini-C specification as understood. Rigorous testing was undertaken using the provided tests as well as extra edge-case tests involving implicit type casting, lazy evaluation, shadowing, associativity, and assignment. Valgrind was used to check for potential memory leaks.
 \newpage
 
 \bibliographystyle{IEEEtran}
+\nocite{*}
 \bibliography{report}
 
 \newpage
