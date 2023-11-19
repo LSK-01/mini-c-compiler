@@ -1620,6 +1620,7 @@ nonTerminalInfo nonterminal(const std::string& name) {
   nonTerminalInfo result;
   std::vector<std::string> epsilonRule;
 
+  //So that if we have a variable terminal like IDENT, we can compare the symbol to this instead of the current token lexeme
   std::string typeLiteralString = typeToString.find(CurTok.type) != typeToString.end() ? typeToString[CurTok.type] : "";
 
   if (productions.find(name) != productions.end()) {
@@ -1635,9 +1636,10 @@ nonTerminalInfo nonterminal(const std::string& name) {
         epsilonRule = rule;
       }
 
+      // shouldn't be any overlap in firstSets (except for when we get to expr)
+      // so this should only 'match' one rule
       if (firstSets[firstSymbol].find(CurTok.lexeme) != firstSets[firstSymbol].end() || firstSets[firstSymbol].find(typeLiteralString) != firstSets[firstSymbol].end()) {
 
-        // hack to get expr working
         if (name == "expr") {
           // expr ::= IDENT "=" expr
           if (rule.size() > 1) {
@@ -1654,14 +1656,15 @@ nonTerminalInfo nonterminal(const std::string& name) {
         }
 
         foundMatch = true;
+        //upon finding a match, go through each symbol in the RHS, get the ASTNodes, add to the map, return
         for (std::string symbol : rule) {
-          // shouldn't be any overlap in firstSets (except for when we get to expr)
-          // so this should only 'match' one rule
+          //update typeLiteralString to match the token we are on
           typeLiteralString = typeToString.find(CurTok.type) != typeToString.end() ? typeToString[CurTok.type] : "";
 
+          //terminals have quotes around them in the productions map
           std::string symbolNoQuotes = removeCharacter(symbol, '"');
           if (isTerminal(symbol) && (symbolNoQuotes == CurTok.lexeme || symbolNoQuotes == typeLiteralString)) {
-
+            //push back a new storage ASTNode with the lexeme of the terminal
             result[symbolNoQuotes].push_back(std::make_unique<StorageAST>(CurTok.lexeme));
             getNextToken();
 
@@ -1688,7 +1691,6 @@ nonTerminalInfo nonterminal(const std::string& name) {
       //'using' the production just entails returning an empty result map for this nonterminal
       if (!(!epsilonRule.empty() && (followSets[name].find(CurTok.lexeme) != followSets[name].end() || followSets[name].find(typeLiteralString) != followSets[name].end()))) {
         throwParserError(expected, CurTok.lexeme);
-      } else {
       }
     }
   } else {
@@ -1701,7 +1703,6 @@ nonTerminalInfo nonterminal(const std::string& name) {
 
 /* program ::= extern_list decl_list
 program ::= decl_list */
-
 ptrVec<ASTNode> program() {
   // first production rule so we need to populate curtok
   getNextToken();
@@ -1724,7 +1725,6 @@ ptrVec<ASTNode> extern_list() {
 
 // extern_list' ::= extern extern_list'
 // extern_list' ::= ''
-// if we don't need to return derived nodes just yet, then don't. More efficient. Otherwise we will be copying nodes
 ptrVec<ASTNode> extern_list_prime() {
   nonTerminalInfo info = nonterminal("extern_list'");
   if (info.size() == 0) {
@@ -1854,6 +1854,7 @@ ptrVec<ASTNode> var_type() {
   auto it = info.begin();
   return std::move(it->second);
 }
+
 /* params ::= param_list
 params ::= "void"
 params ::= '' */
@@ -2004,6 +2005,7 @@ ptrVec<ASTNode> while_stmt() {
   return res;
 }
 
+//if_stmt ::= "if" "(" expr ")" block else_stmt
 ptrVec<ASTNode> if_stmt() {
   nonTerminalInfo info = nonterminal("if_stmt");
 
@@ -2013,6 +2015,8 @@ ptrVec<ASTNode> if_stmt() {
   return res;
 }
 
+/* else_stmt ::= "else" block
+else_stmt ::= '' */
 ptrVec<ASTNode> else_stmt() {
   nonTerminalInfo info = nonterminal("else_stmt");
 
@@ -2023,6 +2027,7 @@ ptrVec<ASTNode> else_stmt() {
   return std::move(info["block"]);
 }
 
+//return_stmt ::= "return" return_stmt'
 ptrVec<ASTNode> return_stmt() {
   nonTerminalInfo info = nonterminal("return_stmt");
   return std::move(info["return_stmt'"]);
@@ -2041,6 +2046,8 @@ ptrVec<ASTNode> return_stmt_prime() {
   return res;
 }
 
+/* expr ::= IDENT "=" expr
+expr ::= rval_or */
 ptrVec<ASTNode> expr() {
   nonTerminalInfo info = nonterminal("expr");
 
@@ -2139,26 +2146,51 @@ ptrVec<ASTNode> rval_or() { return binOp_expTemplate("rval_or", "and_exp"); }
 // rval_or' ::= ''
 ptrVec<ASTNode> rval_or_prime() { return binOp_primeTemplate("rval_or'", "and_exp"); }
 
+//and_exp ::= equality_exp and_exp'
 ptrVec<ASTNode> and_exp() { return binOp_expTemplate("and_exp", "equality_exp"); }
 
+/* and_exp' ::= "&&" equality_exp and_exp'
+and_exp' ::= '' */
 ptrVec<ASTNode> and_exp_prime() { return binOp_primeTemplate("and_exp'", "equality_exp"); }
 
+//equality_exp ::= relational_exp equality_exp'
 ptrVec<ASTNode> equality_exp() { return binOp_expTemplate("equality_exp", "relational_exp"); }
 
+/* equality_exp' ::= "==" relational_exp equality_exp'
+equality_exp' ::= "!=" relational_exp equality_exp'
+equality_exp' ::= '' */
 ptrVec<ASTNode> equality_exp_prime() { return binOp_primeTemplate("equality_exp'", "relational_exp"); }
 
+//relational_exp ::= additive_exp relational_exp'
 ptrVec<ASTNode> relational_exp() { return binOp_expTemplate("relational_exp", "additive_exp"); }
 
+/* relational_exp' ::= "<=" additive_exp relational_exp'
+relational_exp' ::= "<" additive_exp relational_exp'
+relational_exp' ::= ">=" additive_exp relational_exp'
+relational_exp' ::= ">" additive_exp relational_exp'
+relational_exp' ::= '' */
 ptrVec<ASTNode> relational_exp_prime() { return binOp_primeTemplate("relational_exp'", "additive_exp"); }
 
+//additive_exp ::= multiplicative_exp additive_exp'
 ptrVec<ASTNode> additive_exp() { return binOp_expTemplate("additive_exp", "multiplicative_exp"); }
 
+/* additive_exp' ::= "+" multiplicative_exp additive_exp'
+additive_exp' ::= "-" multiplicative_exp additive_exp'
+additive_exp' ::= '' */
 ptrVec<ASTNode> additive_exp_prime() { return binOp_primeTemplate("additive_exp'", "multiplicative_exp"); }
 
+//multiplicative_exp ::= factor multiplicative_exp'
 ptrVec<ASTNode> multiplicative_exp() { return binOp_expTemplate("multiplicative_exp", "factor"); }
 
+/* multiplicative_exp' ::= "*" factor multiplicative_exp'
+multiplicative_exp' ::= "/" factor multiplicative_exp'
+multiplicative_exp' ::= "%" factor multiplicative_exp'
+multiplicative_exp' ::= '' */
 ptrVec<ASTNode> multiplicative_exp_prime() { return binOp_primeTemplate("multiplicative_exp'", "factor"); }
 
+/* factor ::= "-" factor
+factor ::= "!" factor
+factor ::= primary */
 ptrVec<ASTNode> factor() {
   nonTerminalInfo info = nonterminal("factor");
   ptrVec<ASTNode> res;
@@ -2176,6 +2208,11 @@ ptrVec<ASTNode> factor() {
   return res;
 }
 
+/* primary ::= "(" expr ")"
+primary ::= IDENT primary'
+primary ::= INT_LIT
+primary ::= FLOAT_LIT
+primary ::= BOOL_LIT */
 ptrVec<ASTNode> primary() {
   nonTerminalInfo info = nonterminal("primary");
   ptrVec<ASTNode> res;
@@ -2202,6 +2239,8 @@ ptrVec<ASTNode> primary() {
   return res;
 }
 
+/* primary' ::= "(" args ")"
+primary' ::= '' */
 ptrVec<ASTNode> primary_prime() {
   nonTerminalInfo info = nonterminal("primary'");
 
@@ -2217,6 +2256,8 @@ ptrVec<ASTNode> primary_prime() {
   return res;
 }
 
+/* args ::= arg_list
+args ::= '' */
 ptrVec<ASTNode> args() {
   nonTerminalInfo info = nonterminal("args");
 
@@ -2227,6 +2268,7 @@ ptrVec<ASTNode> args() {
   return std::move(info["arg_list"]);
 }
 
+//arg_list ::= expr arg_list'
 ptrVec<ASTNode> arg_list() {
   nonTerminalInfo info = nonterminal("arg_list");
 
@@ -2236,6 +2278,8 @@ ptrVec<ASTNode> arg_list() {
   return argList;
 }
 
+/* arg_list' ::= "," expr arg_list'
+arg_list' ::= '' */
 ptrVec<ASTNode> arg_list_prime() {
   nonTerminalInfo info = nonterminal("arg_list'");
 
@@ -2261,7 +2305,7 @@ inline llvm::raw_ostream& operator<<(llvm::raw_ostream& os, const ASTNode& ast) 
 }
 
 //--------------
-
+// Initialise the function map so we can call functions by their string name in nonterminal()
 static void initialiseFunctionMap() {
   functionMap["extern"] = extern_;
   functionMap["extern_list'"] = extern_list_prime;
@@ -2332,9 +2376,7 @@ int main(int argc, char** argv) {
   readGrammar();
   computeFirst();
   // printFirst();
-
   computeFollow();
-
   // printFollow();
   initialiseFunctionMap();
 
