@@ -44,10 +44,10 @@
 \section*{Parser Design}
 My parser design is quite unique amongst others, and results in clean, concise, bug-free and resilient code. 
 \subsubsection*{Generating First and Follow sets programmatically}
-I parse the grammar from a string form (\code{grammarString.hpp}), create a data structure to hold the productions for each nonterminal, and then compute the first and follow sets. The sets are then used to make the parser predictive - I converted the grammar to only require a lookahead of 1 (in almost every production), and so could use the sets to check the next production to take or whether to take an epsilon production.\\\\
-Doing this programmatically avoided the inevitable errors of manual computation and ensures correctness and robustness of the compiler.
+I parse the grammar from a string form (\code{grammarString.hpp}), create a map to hold the productions for each nonterminal, and then compute the first and follow sets. The sets are then used to make the parser predictive - I converted the grammar to only require a lookahead of 1 (\code{expr} needing 2), and so could use the sets to check the next production to take or whether to take an epsilon production.\\\\
+Doing this programmatically avoided the inevitable errors of sloppy manual computation and ensures correctness and robustness of the compiler.
 \subsubsection*{The \code{nonterminal} function}
-I abstracted out the basic framework for a production into a function \code{nonTerminalInfo nonterminal(const std::string& name)}, which takes the name of the production to parse, and returns a map of strings to vectors of \code{ASTNode}s, for each nonterminal (and terminal) on the production's RHS. A \code{functionMap} is maintained so that the corresponding production function for a given nonterminal can be called dynamically. This removes the common and confusing spaghetti code involving \code{getNextToken()} and \code{putBackToken()} that would otherwise be present, resulting in very short, readable production functions. In fact \code{putBackToken()} was never even needed (and has been removed). As an example, here is the function for the \code{param} production:
+I abstracted out the basic framework for a production into a function \code{nonTerminalInfo nonterminal(const std::string& name)}, which takes the name of the production to parse, and returns a map of strings to vectors of \code{ASTNode}s, for each nonterminal (and terminal) on the production's RHS. A \code{functionMap} is maintained so that the corresponding production function for a given nonterminal can be called dynamically. This removes the common and confusing spaghetti code involving \code{getNextToken()} and \code{putBackToken()} that would otherwise be present, resulting in very short, readable production functions. In fact \code{putBackToken()} was never even needed (and has been removed). As an example, here is the \code{param} production:
 \begin{lstlisting}[]
 ptrVec<ASTNode> param() {
     nonTerminalInfo info = nonterminal("param");
@@ -58,7 +58,7 @@ ptrVec<ASTNode> param() {
     return temp;
 }
 \end{lstlisting}
-Everything is moved around as a general \code{ptrVec<ASTNode> = std::vector<std::unique_ptr<ASTNode>>} to facilitate this approach, until moved into an \code{ASTNode}s constructor, where nodes are cast and extracted as needed. Multiple overloaded templates, \code{castToDerived<Base, Derived>} were created to facilitate clean and easy casting of nodes.
+Everything is moved around as a general \code{ptrVec<ASTNode> = std::vector<std::unique_ptr<ASTNode>>} to facilitate this approach, until moved into an \code{ASTNode}s constructor, where nodes are cast and extracted as needed. Multiple overloaded templates, \code{castToDerived<Base, Derived>} were created to facilitate clean casting of nodes.
 \subsubsection*{ASTNodes}
 \begin{table}[htbp]
     \centering
@@ -75,9 +75,9 @@ Everything is moved around as a general \code{ptrVec<ASTNode> = std::vector<std:
 \end{adjustbox}
 \end{table}
 \noindent Generally, I found directly mirroring the structure of the grammar in my \code{ASTNode}s to be clearest. As a result, and in the service of polymorphism, there are general \code{ASTNode}s like \code{StmtAST}, \code{DeclAST}, and \code{ExprAST} for other nodes to derive from.
-\code{StorageAST} was used to store and access terminal values in my implementation, including things like the value of \code{IDENT}. \code{PartialFuncDeclAST} was needed in service of converting the \code{decl} production to only require a lookahead of 1. A \code{decl'} production was added which produces only the \code{params} and \code{block} of the function.
+\code{StorageAST} was used to store and access terminal values in my implementation, including things like the value of \code{IDENT}. \code{PartialFuncDeclAST} was needed to facilitate converting the \code{decl} production to only require a lookahead of 1, as a \code{decl'} production was added which produces only the \code{params} and \code{block} of the function.
 \subsubsection*{Error handling}
-Yet another benefit of my abstracted \code{nonterminal} function was that it allowed for a sublime way of implementing comprehensive error handling for the parser. I build up a \code{expected} set of terminals (using the first sets) as I check for productions to use - if no production can be found matching the current token, I pass this expected set to \code{throwParserError(const std::unordered_set<std::string>& expected, std::string found)}, which prints a comprehensive error:
+Yet another benefit of my abstracted \code{nonterminal} function was that it allowed for a sublime way of implementing comprehensive error handling for the parser. In the function, I build up an \code{expected} set of terminals (using the first sets) as I check for potential productions to use - if no production can be found whose first set matches the current token, I pass the \code{expected} set to \code{throwParserError(const std::unordered_set<std::string>& expected, std::string found)}, which prints a comprehensive error:
 \begin{lstlisting}[]
 Encountered an error on line 2 column 23.
 Expected one of: void int bool float extern 
@@ -89,15 +89,15 @@ Similarly,
 \section*{IR Generation}
 Use of Finnbar Keating's lecture slides and the Kaleidescope tutorial were used to help find the right Build instructions and methods for some specific generations like function declarations. Beyond this, using BasicBlocks, setting insert points, and creating relevant instructions was a fairly intuitive process.
 \subsubsection*{Casting and Type Checking}
-Following the spirit of delightful code, multiple helper functions were created to make this area clean and robust. 
+Following in the spirit of delightful code, multiple helper functions were created to make this area clean and robust. 
 \begin{itemize}
     \item \code{stringToPtrType} and \code{ptrToStringType} to convert between \code{std::string} and \code{Type*} representations of types
     \item \code{Value* widenLtoR(Value* leftVal, Type* rightType)} which widens \code{leftVal} to \code{rightType} and returns the new corresponding \code{Value*}
     \item Dually, \code{Value* narrowLtoR(Value* leftVal, Type* rightType)}
 \end{itemize}
-Widening and narrowing were implemented using IRBuilder instructions \code{CreateSIToFP}, \code{CreateZExt}, \code{CreateFPToSI}, and \code{CreateICmpNE}. Following the coursework guide, as well as the C99 specification, the following are the rules that I created for type checking and casting:
+Widening and narrowing were implemented using IRBuilder instructions \code{CreateSIToFP}, \code{CreateZExt}, \code{CreateFPToSI}, and \code{CreateICmpNE}. Following the coursework guide, as well as the C99 specification, the following are the rules I derived for type checking and casting:
 \begin{itemize}
-    \item Types are widened as much as needed during arithmetic and logical operations
+    \item Types are widened as much as needed during arithmetic operations, and narrowed for boolean operations
     \item Types are only to be widened when passed into functions
     \item Types are only to be widened when returned from functions
     \item Types are widened or narrowed during variable assignment

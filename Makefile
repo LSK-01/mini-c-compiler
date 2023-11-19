@@ -1,20 +1,12 @@
-CXX=clang++ -std=c++20
+
+CXX=clang++ -std=c++17
 CFLAGS= -g -O3 `llvm-config --cppflags --ldflags --system-libs --libs all` \
 -Wno-unused-function -Wno-unknown-warning-option -frtti
-OUTPUT = mccomp
-SOURCES = mccomp.cpp computeSets.cpp
-OBJECTS = $(SOURCES:.cpp=.o)
 
-# Default target
-all: $(OUTPUT)
+FILES = mccomp.cpp computeSets.cpp
 
-# Rule to generate the output binary
-$(OUTPUT): $(OBJECTS)
-	$(CXX) $(CFLAGS) -o $(OUTPUT) $(OBJECTS)
-
-# Rule to generate object files from source files
-%.o: %.cpp
-	$(CXX) $(CFLAGS) -c $< -o $@
+mccomp: $(FILES)
+	$(CXX) $(FILES) $(CFLAGS) -o mccomp
 
 clean:
-	rm -rf $(OBJECTS) $(OUTPUT)
+	rm -rf mccomp 

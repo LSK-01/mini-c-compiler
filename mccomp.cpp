@@ -373,12 +373,9 @@ static TOKEN gettok() {
 /// token the parser is looking at.  getNextToken reads another token from the
 /// lexer and updates CurTok with its results.
 
-void addIndents(int n, std::string& str) {
-  for (int i = 0; i < n; i++) {
-    str += "\t";
-  }
-}
-
+/// @brief indents a given number of spaces
+/// @param depth
+/// @return
 std::string indent(int depth) { return std::string(depth * 2, ' '); };
 
 static TOKEN CurTok;
@@ -389,6 +386,8 @@ static void populateBuffer() {
     tok_buffer.push_back(gettok());
 }
 
+/// @brief  Returns the next token in the buffer
+/// @return
 static TOKEN getNextToken() {
   // populate buffer so we have a lookahead of 2
   populateBuffer();
@@ -404,6 +403,9 @@ static TOKEN peekNext() {
   return tok_buffer.front();
 }
 
+/// @brief throws an error if the current token is not of the expected type
+/// @param expected
+/// @param found
 static void throwParserError(const std::unordered_set<std::string>& expected, std::string found) {
   std::cout << "\nEncountered an error on line " + std::to_string(lineNo) + " column " + std::to_string(columnNo) + ".\n";
   std::cout << "Expected one of: ";
@@ -414,6 +416,9 @@ static void throwParserError(const std::unordered_set<std::string>& expected, st
   exit(1);
 }
 
+/// @brief throws a codegen error
+/// @param message
+/// @param token
 static void throwCodegenError(std::string message, TOKEN token) {
   std::cout << "\nEncountered an error during IR generation: " << message << "\n" << std::endl;
   std::cout << "Lexeme: " + token.lexeme + "\nOn line: " + std::to_string(token.lineNo) + " column: " + std::to_string(token.columnNo) << std::endl;
@@ -425,7 +430,10 @@ static void throwCodegenError(std::string message, TOKEN token) {
 
 template <typename T> using ptrVec = std::vector<std::unique_ptr<T>>;
 
-// we also reverse when casting a vector of pointers to another vector due to the way we build up our left recursions backwards
+/// @brief Casts a vector of unique pointers to a vector of unique pointers of a derived type. Other overrides cast vectors to single pointers, a pointer to a vector, or a pointer
+/// to a pointer
+/// @param nodes
+/// @param target
 template <typename Base, typename Derived> void castToDerived(std::vector<std::unique_ptr<Base>>& nodes, std::vector<std::unique_ptr<Derived>>& target) {
   for (int i = nodes.size() - 1; i >= 0; i--) {
     auto& node = nodes[i];
@@ -454,7 +462,10 @@ template <typename Base, typename Derived> void castToDerived(std::unique_ptr<Ba
   target.reset(derivedPtr);
 }
 
-//-- codegen --//
+//===----------------------------------------------------------------------===//
+// Code Generation
+//===----------------------------------------------------------------------===//
+
 // so we add a new symbol table only if this is not an immediate function block
 bool isFunctionBlock = false;
 // so we dont add branch instructions after a return statement in a while/if
@@ -491,6 +502,9 @@ void printTables(const Tables& tables) {
   }
 }
 
+/// @brief convert string to type
+/// @param type 
+/// @return 
 Type* stringToPtrType(std::string type) {
   if (type == "bool") {
     return Type::getInt1Ty(TheContext);
@@ -503,19 +517,9 @@ Type* stringToPtrType(std::string type) {
   return Type::getVoidTy(TheContext);
 }
 
-std::string ptrToStringType(Type* type) {
-  if (type == Type::getInt1Ty(TheContext)) {
-    return "bool";
-  } else if (type == Type::getInt32Ty(TheContext)) {
-    return "int";
-  } else if (type == Type::getFloatTy(TheContext)) {
-    return "float";
-  }
-
-  return "void";
-}
-
-// Assign ranks to types: float > 32 bit int > 1 bit int
+/// @brief Converts a Type* to an integer rank value
+/// @param type
+/// @return the rank of the type
 int getTypeRank(Type* type) {
   if (type->isFloatTy())
     return 3;
@@ -528,6 +532,27 @@ int getTypeRank(Type* type) {
   return -1; // Unknown or unsupported type
 };
 
+/// @brief Converts a Type* to a string
+/// @param type 
+/// @return 
+std::string ptrToStringType(Type* type) {
+  int rank = getTypeRank(type);
+  if (rank == 1) {
+    return "bool";
+  }
+  if (rank == 2) {
+    return "int";
+  }
+  if (rank == 3) {
+    return "float";
+  }
+
+  return "void";
+}
+
+/// @brief Get the default constant for a given type
+/// @param type
+/// @return The relevant constant
 Constant* getDefaultConst(Type* type) {
   int rank = getTypeRank(type);
   if (rank == 3) {
@@ -542,19 +567,21 @@ Constant* getDefaultConst(Type* type) {
   return nullptr;
 }
 
-bool compareTypes(Type* type1, Type* type2) {
-
-  // Compare the ranks of the types
-  return getTypeRank(type1) >= getTypeRank(type2);
-}
+/// @brief Compares two types and returns true if the first type is greater than or equal to the second type
+/// @param type1 
+/// @param type2 
+/// @return 
+bool compareTypes(Type* type1, Type* type2) { return getTypeRank(type1) >= getTypeRank(type2); }
 
 static AllocaInst* CreateEntryBlockAlloca(Function* TheFunction, const std::string& VarName, Type* type) {
   IRBuilder<> TmpB(&TheFunction->getEntryBlock(), TheFunction->getEntryBlock().begin());
   return TmpB.CreateAlloca(type, 0, VarName.c_str());
 }
 
-// widens left to right
-// returns the widest type out of both values
+/// @brief Widens the left value to the right type if possible
+/// @param leftVal
+/// @param rightType
+/// @return Value*
 Value* widenLtoR(Value* leftVal, Type* rightType) {
   Value* newVal;
   Type* leftType = leftVal->getType();
@@ -564,13 +591,10 @@ Value* widenLtoR(Value* leftVal, Type* rightType) {
     return leftVal;
   }
 
-  IntegerType* intLeft = cast<IntegerType>(leftVal->getType());
-  unsigned widthLeft = intLeft->getIntegerBitWidth();
-
   if (rightType->isFloatTy()) {
     // if left is bool we need to extend first otherwise we get signed issue
     Value* int32;
-    if (widthLeft == 1) {
+    if (leftVal->getType()->isIntegerTy(1)) {
       int32 = Builder.CreateZExt(leftVal, Type::getInt32Ty(TheContext));
     } else {
       int32 = leftVal;
@@ -581,20 +605,19 @@ Value* widenLtoR(Value* leftVal, Type* rightType) {
   } else {
     // check the bit width of the integers we are dealing with
     // if they are not the same, then we need to widen the smaller one
-
-    IntegerType* intRight = cast<IntegerType>(rightType);
-    unsigned widthRight = intRight->getIntegerBitWidth();
-
-    if (widthRight > widthLeft) {
+    if (rightType->isIntegerTy(32) && leftVal->getType()->isIntegerTy(1)) {
       Value* newVal = Builder.CreateZExt(leftVal, Type::getInt32Ty(TheContext));
       return newVal;
     }
-
-    return leftVal;
   }
+
+  return leftVal;
 }
 
-// return widest type
+/// @brief Narrows the left value to the right type if possible
+/// @param leftVal
+/// @param rightType
+/// @return Value*
 Value* narrowLtoR(Value* leftVal, Type* rightType) {
 
   Type* leftType = leftVal->getType();
@@ -613,13 +636,7 @@ Value* narrowLtoR(Value* leftVal, Type* rightType) {
     // check the bit width of the integers we are dealing with
     // if they are not the same, then we need to widen the smaller one
 
-    IntegerType* intLeft = cast<IntegerType>(newVal->getType());
-    unsigned widthLeft = intLeft->getIntegerBitWidth();
-
-    IntegerType* intRight = cast<IntegerType>(rightType);
-    unsigned widthRight = intRight->getIntegerBitWidth();
-
-    if (widthLeft > widthRight) {
+    if (newVal->getType()->isIntegerTy(32) && rightType->isIntegerTy(1)) {
       // if new val is not equal to 0, then we want 1. otherwise we want 0. perfect.
       Value* boolVal = Builder.CreateICmpNE(newVal, getDefaultConst(Type::getInt32Ty(TheContext)));
       return boolVal;
@@ -627,10 +644,6 @@ Value* narrowLtoR(Value* leftVal, Type* rightType) {
     return newVal;
   }
 }
-
-Value* trueValue = ConstantInt::get(Type::getInt1Ty(TheContext), 1, false);
-
-//-- codegen --//
 
 /// ASTNode - Base class for all AST nodes.
 class ASTNode {
@@ -657,7 +670,7 @@ public:
       // first make sure we cast to bool if needed
       Value* narrowedValue = narrowLtoR(childVal, Type::getInt1Ty(TheContext));
       // flipit
-      return Builder.CreateXor(narrowedValue, trueValue);
+      return Builder.CreateXor(narrowedValue, ConstantInt::get(Type::getInt1Ty(TheContext), 1, false));
     }
     if (symbol == "-") {
       Value* widestValue = widenLtoR(childVal, Type::getInt32Ty(TheContext));
@@ -667,12 +680,11 @@ public:
       return Builder.CreateSub(getDefaultConst(Type::getInt32Ty(TheContext)), widestValue);
     }
 
-    return nullptr;
+    throwCodegenError("Unknown unary operator " + symbol, token);
   };
 
   virtual std::string to_string(int d) const override {
     std::string str = "\n";
-
     str += indent(d);
     str += "<Negation symbol='" + symbol + "'>";
     str += child->to_string(d + 1);
@@ -756,7 +768,6 @@ public:
   virtual std::string to_string(int d) const override {
     std::string str = "\n";
     str += indent(d);
-
     str += "<Bool val='" + std::to_string(Val) + "'/>";
     return str;
   };
@@ -812,7 +823,6 @@ public:
   virtual std::string to_string(int d) const override {
     std::string str = "\n";
     str += indent(d);
-
     str += "<FuncCall name='" + name + "'>";
     for (auto& arg : args) {
       str += arg->to_string(d + 1);
@@ -896,7 +906,7 @@ public:
     if (op == "&&") {
       Value* leftVal = this->left->codegen();
       Value* narrowedValueLeft = narrowLtoR(leftVal, Type::getInt1Ty(TheContext));
-
+      
       BasicBlock* leftFalseBB = BasicBlock::Create(TheContext, "leftTrue", TheFunction);
       BasicBlock* evalRightBB = BasicBlock::Create(TheContext, "evalRight", TheFunction);
       BasicBlock* mergeBB = BasicBlock::Create(TheContext, "merge", TheFunction);
@@ -1015,6 +1025,8 @@ public:
         return Builder.CreateFCmpULT(widestValueLeft, widestValueRight);
       }
       return Builder.CreateICmpSLT(widestValueLeft, widestValueRight);
+    } else {
+      throwCodegenError("Unknown operator " + op, token);
     }
   };
 
@@ -1042,6 +1054,9 @@ public:
     // get the last symbol table, push to that one (this is the nested block we are in)
     // if tables.size() is 0, then we are declaring a global variable
     if (tables.size() == 0) {
+      if (globalTable.find(name) != globalTable.end()) {
+        throwCodegenError("Found re-declaration of global variable " + name, token);
+      }
       GlobalVariable* gvar = new GlobalVariable(*(TheModule.get()), typePtr, false, GlobalValue::CommonLinkage, nullptr);
       gvar->setAlignment(MaybeAlign(4));
       gvar->setInitializer(getDefaultConst(typePtr));
@@ -1050,7 +1065,7 @@ public:
     } else {
       // check we are not redeclaring the same variable in the same scope
       if (tables[tables.size() - 1].find(name) != tables[tables.size() - 1].end()) {
-        throwCodegenError("Found re-declaration of variable " + name, token);
+        throwCodegenError("Found re-declaration of local variable " + name, token);
       }
 
       AllocaInst* alloca = CreateEntryBlockAlloca(Builder.GetInsertBlock()->getParent(), name, typePtr);
@@ -1189,8 +1204,7 @@ public:
     if (expression) {
       str += expression->to_string(d + 1);
     }
-        str += "\n";
-
+    str += "\n";
     str += indent(d);
     str += "</Return>";
     return str;
@@ -1246,8 +1260,7 @@ public:
     for (auto& s : stmts) {
       str += s->to_string(d + 1);
     }
-        str += "\n";
-
+    str += "\n";
     str += indent(d);
     str += "</Block>";
     return str;
@@ -1323,8 +1336,7 @@ public:
     if (elseBody) {
       str += elseBody->to_string(d + 1);
     }
-        str += "\n";
-
+    str += "\n";
     str += indent(d);
     str += "</If>";
     return str;
@@ -1377,8 +1389,7 @@ public:
     str += "<While>";
     str += expression->to_string(d + 1);
     str += stmt->to_string(d + 1);
-        str += "\n";
-
+    str += "\n";
     str += indent(d);
     str += "</While>";
     return str;
@@ -1435,7 +1446,7 @@ public:
     for (auto& param : params) {
       str += param->to_string(d + 1);
     }
-        str += "\n";
+    str += "\n";
 
     str += indent(d);
     str += "</Prototype>";
@@ -1488,7 +1499,7 @@ public:
       if (TheFunction->getReturnType()->isVoidTy()) {
         Builder.CreateRetVoid();
       } else {
-        // im going to return a default value as this is intuitive for the user :)))))))))))
+        // im going to return a default value as this is intuitive for the user
         Builder.CreateRet(getDefaultConst(TheFunction->getReturnType()));
       }
     }
@@ -1509,7 +1520,7 @@ public:
     str += prototype->to_string(d + 1);
 
     str += block->to_string(d + 1);
-        str += "\n";
+    str += "\n";
 
     str += indent(d);
     str += "</FuncDecl>";
@@ -1589,7 +1600,6 @@ std::unordered_map<int, std::string> typeToString = {
 // Recursive Descent Parser - Function call for each production
 //===----------------------------------------------------------------------===//
 
-/* Add function calls for each production */
 void printMap(const std::unordered_map<std::string, std::vector<std::unique_ptr<ASTNode>>>& myMap) {
   for (const auto& pair : myMap) {
     const auto& key = pair.first;
@@ -1601,6 +1611,9 @@ void printMap(const std::unordered_map<std::string, std::vector<std::unique_ptr<
 
 using nonTerminalInfo = std::unordered_map<std::string, std::vector<std::unique_ptr<ASTNode>>>;
 
+/// @brief Takes the name of a nonterminal and returns a map of the nonterminal's RHS elements and their results
+/// @param name
+/// @return nonTerminalInfo
 nonTerminalInfo nonterminal(const std::string& name) {
   bool foundMatch = false;
   std::unordered_set<std::string> expected;
@@ -1820,6 +1833,8 @@ ptrVec<ASTNode> decl_prime() {
   return res;
 }
 
+/* type_spec ::= "void"
+type_spec ::= var_type */
 ptrVec<ASTNode> type_spec() {
   nonTerminalInfo info = nonterminal("type_spec");
 
@@ -1830,12 +1845,18 @@ ptrVec<ASTNode> type_spec() {
   }
 }
 
+/* var_type  ::= "int"
+var_type ::= "float"
+var_type ::= "bool"
+ */
 ptrVec<ASTNode> var_type() {
   nonTerminalInfo info = nonterminal("var_type");
   auto it = info.begin();
   return std::move(it->second);
 }
-
+/* params ::= param_list
+params ::= "void"
+params ::= '' */
 ptrVec<ASTNode> params() {
   nonTerminalInfo info = nonterminal("params");
 
@@ -1847,6 +1868,7 @@ ptrVec<ASTNode> params() {
   }
 }
 
+// param_list ::= param param_list'
 ptrVec<ASTNode> param_list() {
   nonTerminalInfo info = nonterminal("param_list");
 
@@ -1857,6 +1879,9 @@ ptrVec<ASTNode> param_list() {
   return paramList;
 }
 
+/* param_list' ::= "," param param_list'
+param_list' ::= ''
+ */
 ptrVec<ASTNode> param_list_prime() {
   nonTerminalInfo info = nonterminal("param_list'");
   if (info.size() == 0) {
@@ -1869,6 +1894,7 @@ ptrVec<ASTNode> param_list_prime() {
   return paramList;
 }
 
+//param ::= var_type IDENT
 ptrVec<ASTNode> param() {
   nonTerminalInfo info = nonterminal("param");
   ptrVec<ASTNode> temp;
@@ -1876,6 +1902,7 @@ ptrVec<ASTNode> param() {
   return temp;
 }
 
+//block ::= "{" local_decls stmt_list "}"
 ptrVec<ASTNode> block() {
   nonTerminalInfo info = nonterminal("block");
 
@@ -1884,6 +1911,8 @@ ptrVec<ASTNode> block() {
   return temp;
 }
 
+/* local_decls ::= local_decl local_decls
+local_decls ::= '' */
 ptrVec<ASTNode> local_decls() {
   nonTerminalInfo info = nonterminal("local_decls");
 
@@ -1897,6 +1926,7 @@ ptrVec<ASTNode> local_decls() {
   return localDecls;
 }
 
+//local_decl ::= var_type IDENT ";"
 ptrVec<ASTNode> local_decl() {
   nonTerminalInfo info = nonterminal("local_decl");
 
@@ -1905,6 +1935,8 @@ ptrVec<ASTNode> local_decl() {
   return temp;
 }
 
+/* stmt_list ::= stmt stmt_list'
+stmt_list ::= '' */
 ptrVec<ASTNode> stmt_list() {
   nonTerminalInfo info = nonterminal("stmt_list");
 
@@ -1918,6 +1950,8 @@ ptrVec<ASTNode> stmt_list() {
   return stmts;
 }
 
+/* stmt_list' ::= stmt stmt_list'
+stmt_list' ::= '' */
 ptrVec<ASTNode> stmt_list_prime() {
   nonTerminalInfo info = nonterminal("stmt_list'");
 
@@ -1932,6 +1966,11 @@ ptrVec<ASTNode> stmt_list_prime() {
   return stmtList;
 }
 
+/* stmt ::= expr_stmt
+stmt ::= block
+stmt ::= if_stmt
+stmt ::= while_stmt
+stmt ::= return_stmt */
 ptrVec<ASTNode> stmt() {
   nonTerminalInfo info = nonterminal("stmt");
   auto it = info.begin();
@@ -1939,6 +1978,8 @@ ptrVec<ASTNode> stmt() {
   return std::move(it->second);
 }
 
+/* expr_stmt ::= expr ";"
+expr_stmt ::= ";" */
 ptrVec<ASTNode> expr_stmt() {
   nonTerminalInfo info = nonterminal("expr_stmt");
 
@@ -1953,6 +1994,7 @@ ptrVec<ASTNode> expr_stmt() {
   return res;
 }
 
+//while_stmt ::= "while" "(" expr ")" stmt
 ptrVec<ASTNode> while_stmt() {
   nonTerminalInfo info = nonterminal("while_stmt");
 
@@ -2013,6 +2055,10 @@ ptrVec<ASTNode> expr() {
   return res;
 }
 
+/// @brief A general function for the binary_operation productions
+/// @param prodName
+/// @param secondTerm
+/// @return ptrVec<ASTNode>
 ptrVec<ASTNode> binOp_expTemplate(std::string prodName, std::string secondTerm) {
   nonTerminalInfo info = nonterminal(prodName);
   ptrVec<ASTNode>& first = info[secondTerm];
@@ -2040,6 +2086,10 @@ ptrVec<ASTNode> binOp_expTemplate(std::string prodName, std::string secondTerm) 
   return res;
 }
 
+/// @brief A general function for the binary_operation' productions
+/// @param prodName
+/// @param secondTerm
+/// @return ptrVec<ASTNode>
 ptrVec<ASTNode> binOp_primeTemplate(std::string prodName, std::string secondTerm) {
   nonTerminalInfo info = nonterminal(prodName);
 
@@ -2200,10 +2250,6 @@ ptrVec<ASTNode> arg_list_prime() {
 }
 
 static std::unique_ptr<ASTNode> parser() { return std::move(program()[0]); }
-
-//===----------------------------------------------------------------------===//
-// Code Generation
-//===----------------------------------------------------------------------===//
 
 //===----------------------------------------------------------------------===//
 // AST Printer

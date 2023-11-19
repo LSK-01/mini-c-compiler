@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023) (preloaded format=pdflatex 2023.3.29)  18 NOV 2023 21:28
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023) (preloaded format=pdflatex 2023.3.29)  19 NOV 2023 19:57
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -410,15 +410,15 @@ Package rerunfilecheck Info: File `report.out' has not changed.
 (rerunfilecheck)             Checksum: D41D8CD98F00B204E9800998ECF8427E;0.
  ) 
 Here is how much of TeX's memory you used:
- 12849 strings out of 476025
- 203064 string characters out of 5790017
- 2057388 words of memory out of 5000000
- 33080 multiletter control sequences out of 15000+600000
+ 12851 strings out of 476025
+ 203082 string characters out of 5790017
+ 2058388 words of memory out of 5000000
+ 33082 multiletter control sequences out of 15000+600000
  514522 words of font info for 40 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 86i,11n,97p,847b,1274s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 86i,11n,97p,830b,1274s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx12.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr5.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsl10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmtt9.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfrm1000.pfb>
-Output written on report.pdf (7 pages, 113389 bytes).
+Output written on report.pdf (7 pages, 113443 bytes).
 PDF statistics:
  137 PDF objects out of 1000 (max. 8388607)
  112 compressed objects within 2 object streams
