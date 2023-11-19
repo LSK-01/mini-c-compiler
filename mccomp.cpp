@@ -379,6 +379,8 @@ void addIndents(int n, std::string& str) {
   }
 }
 
+std::string indent(int depth) { return std::string(depth * 2, ' '); };
+
 static TOKEN CurTok;
 static std::deque<TOKEN> tok_buffer;
 
@@ -569,9 +571,8 @@ Value* widenLtoR(Value* leftVal, Type* rightType) {
     // if left is bool we need to extend first otherwise we get signed issue
     Value* int32;
     if (widthLeft == 1) {
-        int32 = Builder.CreateZExt(leftVal, Type::getInt32Ty(TheContext));
-    }
-    else{
+      int32 = Builder.CreateZExt(leftVal, Type::getInt32Ty(TheContext));
+    } else {
       int32 = leftVal;
     }
 
@@ -670,13 +671,14 @@ public:
   };
 
   virtual std::string to_string(int d) const override {
-    std::string str = "";
+    std::string str = "\n";
 
-    addIndents(d, str);
-    str += "<Negation symbol='" + symbol + "'>\n";
+    str += indent(d);
+    str += "<Negation symbol='" + symbol + "'>";
     str += child->to_string(d + 1);
-    addIndents(d, str);
-    str += "</Negation>\n";
+    str += "\n";
+    str += indent(d);
+    str += "</Negation>";
     return str;
   };
 };
@@ -707,8 +709,9 @@ public:
   };
   virtual Value* codegen() override { return ConstantInt::get(TheContext, APInt(32, Val, true)); };
   virtual std::string to_string(int d) const override {
-    std::string str = "";
-    str += "<Int val='" + std::to_string(Val) + "'/>\n";
+    std::string str = "\n";
+    str += indent(d);
+    str += "<Int val='" + std::to_string(Val) + "'/>";
     return str;
   };
 };
@@ -727,8 +730,10 @@ public:
   virtual Value* codegen() override { return ConstantFP::get(TheContext, APFloat(Val)); };
 
   virtual std::string to_string(int d) const override {
-    std::string str = "";
-    str += "<Float val='" + std::to_string(Val) + "'/>\n";
+    std::string str = "\n";
+    str += indent(d);
+
+    str += "<Float val='" + std::to_string(Val) + "'/>";
     return str;
   };
 };
@@ -749,8 +754,10 @@ public:
   };
   virtual Value* codegen() override { return ConstantInt::get(TheContext, APInt(1, Val, false)); };
   virtual std::string to_string(int d) const override {
-    std::string str = "";
-    str += "<Bool val='" + std::to_string(Val) + "'/>\n";
+    std::string str = "\n";
+    str += indent(d);
+
+    str += "<Bool val='" + std::to_string(Val) + "'/>";
     return str;
   };
 };
@@ -803,12 +810,16 @@ public:
   };
 
   virtual std::string to_string(int d) const override {
-    std::string str = "";
+    std::string str = "\n";
+    str += indent(d);
+
     str += "<FuncCall name='" + name + "'>";
     for (auto& arg : args) {
       str += arg->to_string(d + 1);
     }
-    str += "</FuncCall>\n";
+    str += "\n";
+    str += indent(d);
+    str += "</FuncCall>";
     return str;
   };
 };
@@ -838,8 +849,9 @@ public:
   };
 
   virtual std::string to_string(int d) const override {
-    std::string str = "";
-    str += "<VarCall name='" + name + "' />\n";
+    std::string str = "\n";
+    str += indent(d);
+    str += "<VarCall name='" + name + "' />";
     return str;
   };
 };
@@ -1007,13 +1019,14 @@ public:
   };
 
   virtual std::string to_string(int d) const override {
-    std::string str = "";
-    addIndents(d, str);
-    str += "<BinOp op='" + op + "'>\n";
+    std::string str = "\n";
+    str += indent(d);
+    str += "<BinOp op='" + op + "'>";
     str += left->to_string(d + 1);
     str += right->to_string(d + 1);
-    addIndents(d, str);
-    str += "</BinOp>\n";
+    str += "\n";
+    str += indent(d);
+    str += "</BinOp>";
     return str;
   };
 };
@@ -1049,10 +1062,10 @@ public:
   };
 
   virtual std::string to_string(int d) const override {
-    std::string str = "";
-    addIndents(d, str);
+    std::string str = "\n";
+    str += indent(d);
     str += "<VarDecl type='" + type + "' name='" + name + "'>";
-    str += "</VarDecl>\n";
+    str += "</VarDecl>";
     return str;
   };
 };
@@ -1062,10 +1075,10 @@ public:
   ParamAST(ptrVec<ASTNode>&& type, ptrVec<ASTNode>&& name) : VarDeclAST(std::move(type), std::move(name)){};
   virtual Value* codegen() override { return nullptr; };
   virtual std::string to_string(int d) const override {
-    std::string str = "";
-    addIndents(d, str);
+    std::string str = "\n";
+    str += indent(d);
     str += "<Param type='" + type + "' name='" + name + "'>";
-    str += "</Param>\n";
+    str += "</Param>";
     return str;
   };
 };
@@ -1105,12 +1118,13 @@ public:
   };
 
   virtual std::string to_string(int d) const override {
-    std::string str = "";
-    addIndents(d, str);
-    str += "<VarAssign name='" + name + "'>\n";
+    std::string str = "\n";
+    str += indent(d);
+    str += "<VarAssign name='" + name + "'>";
     str += expression->to_string(d + 1);
-    addIndents(d, str);
-    str += "</VarAssign>\n";
+    str += "\n";
+    str += indent(d);
+    str += "</VarAssign>";
     return str;
   };
 };
@@ -1127,12 +1141,13 @@ public:
   virtual Value* codegen() override { return expression->codegen(); };
 
   virtual std::string to_string(int d) const override {
-    std::string str = "";
-    addIndents(d, str);
-    str += "<ExprStmt>\n";
+    std::string str = "\n";
+    str += indent(d);
+    str += "<ExprStmt>";
     str += expression->to_string(d + 1);
-    addIndents(d, str);
-    str += "</ExprStmt>\n";
+    str += "\n";
+    str += indent(d);
+    str += "</ExprStmt>";
     return str;
   };
 };
@@ -1167,15 +1182,17 @@ public:
   };
 
   virtual std::string to_string(int d) const override {
-    std::string str = "";
-    addIndents(d, str);
-    str += "<Return>\n";
+    std::string str = "\n";
+    str += indent(d);
+    str += "<Return>";
 
     if (expression) {
       str += expression->to_string(d + 1);
     }
-    addIndents(d, str);
-    str += "</Return>\n";
+        str += "\n";
+
+    str += indent(d);
+    str += "</Return>";
     return str;
   };
 };
@@ -1220,17 +1237,19 @@ public:
   };
 
   virtual std::string to_string(int d) const override {
-    std::string str = "";
-    addIndents(d, str);
-    str += "<Block>\n";
+    std::string str = "\n";
+    str += indent(d);
+    str += "<Block>";
     for (auto& local : localDecls) {
       str += local->to_string(d + 1);
     }
     for (auto& s : stmts) {
       str += s->to_string(d + 1);
     }
-    addIndents(d, str);
-    str += "</Block>\n";
+        str += "\n";
+
+    str += indent(d);
+    str += "</Block>";
     return str;
   };
 };
@@ -1296,14 +1315,18 @@ public:
   };
 
   virtual std::string to_string(int d) const override {
-    std::string str = "";
-    addIndents(d, str);
-    str += "<If>\n";
+    std::string str = "\n";
+    str += indent(d);
+    str += "<If>";
     str += expression->to_string(d + 1);
     str += body->to_string(d + 1);
-    str += elseBody->to_string(d + 1);
-    addIndents(d, str);
-    str += "</If>\n";
+    if (elseBody) {
+      str += elseBody->to_string(d + 1);
+    }
+        str += "\n";
+
+    str += indent(d);
+    str += "</If>";
     return str;
   };
 };
@@ -1323,7 +1346,7 @@ public:
     BasicBlock* condBlock = BasicBlock::Create(TheContext, "condition", TheFunction);
     BasicBlock* whileBlock = BasicBlock::Create(TheContext, "while", TheFunction);
     BasicBlock* end = BasicBlock::Create(TheContext, "end", TheFunction);
-    
+
     Builder.CreateBr(condBlock);
 
     Builder.SetInsertPoint(condBlock);
@@ -1349,12 +1372,14 @@ public:
   };
 
   virtual std::string to_string(int d) const override {
-    std::string str = "";
-    addIndents(d, str);
+    std::string str = "\n";
+    str += indent(d);
     str += "<While>";
     str += expression->to_string(d + 1);
     str += stmt->to_string(d + 1);
-    addIndents(d, str);
+        str += "\n";
+
+    str += indent(d);
     str += "</While>";
     return str;
   };
@@ -1404,14 +1429,16 @@ public:
   };
 
   virtual std::string to_string(int d) const override {
-    std::string str = "";
-    addIndents(d, str);
-    str += "<Prototype type='" + type + "' name='" + name + "'>\n";
+    std::string str = "\n";
+    str += indent(d);
+    str += "<Prototype type='" + type + "' name='" + name + "'>";
     for (auto& param : params) {
       str += param->to_string(d + 1);
     }
-    addIndents(d, str);
-    str += "</Prototype>\n";
+        str += "\n";
+
+    str += indent(d);
+    str += "</Prototype>";
     return str;
   };
 };
@@ -1466,8 +1493,8 @@ public:
       }
     }
 
-    //if still not valid after 
-    if(verifyFunction(*TheFunction)){
+    // if still not valid after
+    if (verifyFunction(*TheFunction)) {
       throwCodegenError("IR is not valid.", token);
     }
 
@@ -1475,15 +1502,17 @@ public:
   };
 
   virtual std::string to_string(int d) const override {
-    std::string str = "";
-    addIndents(d, str);
-    str += "<FuncDecl>\n";
+    std::string str = "\n";
+    str += indent(d);
+    str += "<FuncDecl>";
 
     str += prototype->to_string(d + 1);
 
     str += block->to_string(d + 1);
-    addIndents(d, str);
-    str += "</FuncDecl>\n";
+        str += "\n";
+
+    str += indent(d);
+    str += "</FuncDecl>";
 
     return str;
   };
@@ -1497,8 +1526,8 @@ public:
   virtual Value* codegen() override { return expression->codegen(); };
 
   virtual std::string to_string(int d) const override {
-    std::string str = "";
-    addIndents(d, str);
+    std::string str = "\n";
+    str += indent(d);
     str += expression->to_string(d + 1);
 
     return str;
@@ -1528,7 +1557,7 @@ public:
   }
 
   virtual std::string to_string(int d) const override {
-    std::string str = "<Program>\n";
+    std::string str = "<Program>";
     for (auto& externNode : externList) {
       str += externNode->to_string(d + 1);
     }
